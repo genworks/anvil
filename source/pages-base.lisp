@@ -21,9 +21,43 @@
 
 (defun hs (text) (html-escape text))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; cl-who writes literal strings and evaluates other forms for effect,
+  ;; so a bare (hs ...) inside a tag wrote nothing (every badge, name
+  ;; and count on the site was empty, 2026-10-08).  `html' walks its
+  ;; body first and wraps each (hs ...) in body position in (str ...).
+  (defun who-attributes-and-body (forms)
+    "FORMS after a tag's keyword: two values, the attribute plist and the body."
+    (loop while (and (consp forms) (keywordp (first forms)) (consp (rest forms)))
+          collect (pop forms) into attributes
+          collect (who-code (pop forms)) into attributes
+          finally (return (values attributes forms))))
+  (defun who-body (form)
+    "FORM in a tag's or htm's body position, with (hs ...) made to print."
+    (cond ((atom form) form)
+          ((eq (first form) 'hs) `(str ,(who-code form)))
+          ((eq (first form) 'htm) `(htm ,@(mapcar #'who-body (rest form))))
+          ((keywordp (first form))
+           (multiple-value-bind (attributes body) (who-attributes-and-body (rest form))
+             `(,(first form) ,@attributes ,@(mapcar #'who-body body))))
+          ((and (consp (first form)) (keywordp (first (first form))))
+           ;; ((:tag attrs...) body...)
+           `((,(first (first form)) ,@(nth-value 0 (who-attributes-and-body (rest (first form)))))
+             ,@(mapcar #'who-body (rest form))))
+          (t (who-code form))))
+  (defun who-code (form)
+    "FORM as Lisp code, with any (htm ...) inside it walked as a body."
+    (cond ((atom form) form)
+          ((eq (first form) 'quote) form)
+          ((eq (first form) 'htm) `(htm ,@(mapcar #'who-body (rest form))))
+          (t (let ((walked nil) (tail form))
+               (loop while (consp tail) do (push (who-code (pop tail)) walked))
+               ;; a dotted tail stays as it is
+               (let ((list (nreverse walked))) (if tail (nconc list tail) list)))))))
+
 (defmacro html (&body body)
-  "A string of HTML from cl-who forms."
-  `(with-lhtml-string () ,@body))
+  "A string of HTML from cl-who forms; see the walk above."
+  `(with-lhtml-string () ,@(mapcar #'who-body body)))
 
 (defvar *site-script* "" "The pages' one script; set below, after the site object.")
 
@@ -332,4 +366,4 @@ error a 500 page (and a log line)."
     (and notice (hs notice))))
 
 (defun with-notice (url notice)
-  (format nil "~a~a notice=~a" url (if (position #\? url) "&" "?") (url-encode notice)))
+  (format nil "~a~anotice=~a" url (if (position #\? url) "&" "?") (url-encode notice)))

@@ -1,0 +1,62 @@
+#!/bin/bash
+# run -- the lab end-to-end rig (ci/lab-e2e/README.md): up, push, deploy, worker, browser, down.
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+ANVIL_DIR=${ANVIL_DIR:-$(cd "$HERE/../.." && pwd)}
+MONOCLE_DIR=${MONOCLE_DIR:-$ANVIL_DIR/../monocle}
+DEMOS_DIR=${DEMOS_DIR:-$ANVIL_DIR/../demos}
+CLSITE_DEPLOY=${CLSITE_DEPLOY:-$ANVIL_DIR/../../gitlab.clnet/clo/cl-site/clnet/deploy}
+WORK=${WORK:-/tmp/anvil-lab-e2e}
+ENV=$WORK/e2e.env
+compose() { docker compose -f "$CLSITE_DEPLOY/docker-compose.yml" -f "$HERE/compose.override.yml" --env-file "$ENV" --project-directory "$CLSITE_DEPLOY" "$@"; }
+flow() { docker run --rm --network anvil-e2e_default -v "$WORK:/e2e:ro" -v "$HERE:/kit:ro" curlimages/curl:latest sh "/kit/$1"; }
+
+case "${1-}" in
+  up)
+    mkdir -p "$WORK"
+    [ -f "$WORK/hosting-secret" ] || openssl rand -hex 24 > "$WORK/hosting-secret"
+    [ -f "$WORK/admin-secret" ] || openssl rand -hex 24 > "$WORK/admin-secret"
+    chmod 644 "$WORK/hosting-secret" "$WORK/admin-secret"
+    cat > "$ENV" <<EOF
+COMPOSE_PROJECT_NAME=anvil-e2e
+ANVIL_DIR=$ANVIL_DIR
+MONOCLE_DIR=$MONOCLE_DIR
+DEMOS_DIR=$DEMOS_DIR
+CLSITE_DEPLOY=$CLSITE_DEPLOY
+WORK=$WORK
+CLNET_IMAGE=${CLNET_IMAGE:-genworks/gendl:devo-ccl}
+CLNET_LAB_REPLICAS=1
+CLNET_LAB_GITLAB=http://anvil:9095
+CLNET_LAB_HOST=lab
+CLNET_LAB_APP_ORIGIN=http://lab-apps:9080
+CLNET_LAB_HOSTING_SECRET=$(cat "$WORK/hosting-secret")
+CLNET_LAB_HOSTING_ADMIN_SECRET=$(cat "$WORK/admin-secret")
+CLNET_LAB_PORT=19782
+CLNET_GATE_PORT=19783
+NTFY_PORT=19781
+CLNET_PORT=19780
+EOF
+    compose up -d anvil
+    echo "waiting for the forge..."
+    for i in $(seq 1 90); do sleep 4; docker logs anvil-e2e-anvil-1 2>&1 | grep -q '^CLIENT_ID=' && break; done
+    docker logs anvil-e2e-anvil-1 2>&1 | sed -n 's/^TOKEN=//p' | tail -1 > "$WORK/token"
+    ID=$(docker logs anvil-e2e-anvil-1 2>&1 | sed -n 's/^CLIENT_ID=//p' | tail -1)
+    SECRET=$(docker logs anvil-e2e-anvil-1 2>&1 | sed -n 's/^CLIENT_SECRET=//p' | grep -v unchanged | tail -1)
+    grep -q '^E2E_CLIENT_ID=' "$ENV" || printf 'E2E_CLIENT_ID=%s\nE2E_CLIENT_SECRET=%s\n' "$ID" "$SECRET" >> "$ENV"
+    compose up -d cyclops lab
+    # the test project: Monocle's example with a ci.sexp whose :deploy job runs when DEPLOY=on
+    if [ ! -d "$WORK/repo/.git" ]; then
+      rm -rf "$WORK/repo"; mkdir -p "$WORK/repo"; cp -r "$MONOCLE_DIR/examples/hello-toll/." "$WORK/repo/"
+      cp "$HERE/ci.sexp" "$WORK/repo/ci.sexp"
+      (cd "$WORK/repo" && git init -q -b master && git add -A && git -c user.name=Dave -c user.email=dave@example.test commit -q -m "hello-toll: Monocle's example, with a ci.sexp" \
+         && git push -q "http://dave:$(cat "$WORK/token")@127.0.0.1:19795/dave/hello-toll.git" master)
+    fi
+    echo "forge http://127.0.0.1:19795 (dave / password123); the lab answers in a few minutes: docker ps"
+    ;;
+  push) flow gate-push.sh ;;
+  deploy) flow gate-deploy.sh ;;
+  worker) flow worker.sh ;;
+  browser) echo "run browser.sh where chromium is, on the anvil-e2e_default network (README)"; ;;
+  down) compose down -v; ;;
+  *) echo "usage: run up|push|deploy|worker|browser|down" >&2; exit 2 ;;
+esac

@@ -389,12 +389,23 @@ path up to a resource word), and the segments after it."
       ((string= (first rest) "variables") (api-variables req ent project (rest rest)))
       ((string= (first rest) "hooks") (api-hooks req ent project (rest rest)))
       ((string= (first rest) "members")
-       (respond-page req ent (append (members-with-users project)
-                                     (multiple-value-bind (ns kind) (project-namespace project)
-                                       (ecase kind
-                                         (:group (members-with-users ns))
-                                         (:user (list (cons ns 50))))))
-                     (lambda (pair) (let ((table (user-json (car pair)))) (setf (gethash "access_level" table) (cdr pair)) table))))
+       ;; GET members (direct), members/all (the namespace's too),
+       ;; members/:user_id and members/all/:user_id (one member, as the
+       ;; git gate asks before it hosts a project)
+       (let* ((all? (equal (second rest) "all"))
+              (who (if all? (third rest) (second rest)))
+              (members (append (members-with-users project)
+                               (when all?
+                                 (multiple-value-bind (ns kind) (project-namespace project)
+                                   (ecase kind
+                                     (:group (members-with-users ns))
+                                     (:user (list (cons ns 50))))))))
+              (member-json (lambda (pair) (let ((table (user-json (car pair)))) (setf (gethash "access_level" table) (cdr pair)) table))))
+         (if who
+             (let ((pair (find (ignore-errors (parse-integer who)) members :key (lambda (pair) (getf (car pair) :id)))))
+               (unless pair (not-found "No such member."))
+               (respond-json req ent (funcall member-json pair)))
+             (respond-page req ent members member-json))))
       ((string= (first rest) "deployments")
        (respond-page req ent (project-deployments project) #'deployment-json))
       ((string= (first rest) "labels")

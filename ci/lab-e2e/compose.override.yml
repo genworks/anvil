@@ -1,0 +1,32 @@
+# compose.override.yml -- the lab end-to-end rig, over clnet's deploy/docker-compose.yml
+# (ci/lab-e2e/README.md).  Variables come from the env file `run up` writes.
+services:
+  anvil:
+    image: ${CLNET_IMAGE:-genworks/gendl:devo-ccl}
+    user: "0"
+    environment:
+      HOME: /home/gendl-user
+    command: ["sh", "-c", "cd /opt/gendl && ./gdl/program/gdl-ccl -n -b --load /kit/anvil-init.lisp"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ANVIL_DIR}:/anvil:ro
+      - ${MONOCLE_DIR}:/monocle:ro
+      - ${ANVIL_DIR}/ci/lab-e2e:/kit:ro
+      - ${WORK}/hosting-secret:/run/anvil-hosting-secret:ro
+    ports:
+      - "127.0.0.1:19795:9095"
+  lab:
+    volumes:
+      - ${ANVIL_DIR}/ci/lab-e2e/lab-shim.lisp:/home/gendl-user/gdl-services-init.cl:ro
+      - ${CLSITE_DEPLOY}/lab-init.lisp:/lab-init-real.lisp:ro
+      - ${DEMOS_DIR}:/lab/demos:ro
+      - ${MONOCLE_DIR}:/lab/monocle:ro
+      - lab-state:/state
+  cyclops:
+    environment:
+      CYCLOPS_HOSTING_SECRET: ${CLNET_LAB_HOSTING_SECRET}
+      CYCLOPS_GIT_CLIENT_ID: ${E2E_CLIENT_ID-}
+      CYCLOPS_GIT_CLIENT_SECRET: ${E2E_CLIENT_SECRET-}
+    volumes:
+      - ${ANVIL_DIR}/ci/lab-e2e/cyclops.sexp:/etc/cyclops/cyclops.sexp:ro
+      - cyclops-state:/projects/.state
