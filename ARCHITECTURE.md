@@ -377,7 +377,9 @@ anvil/
     source/         package, octets, zlib, pkt-line, objects, loose,
                     pack, refs, repository, write, diff, merge,
                     packwriter, protocol, archive
-    test/test.lisp  its checks, against a real repository
+    test/test.lisp  its checks, in a scratch repository
+    test/differential.sh, differential.lisp
+                    the host's git and Ingot asked the same questions
     ingot.asd       written by hand
   source/           package, parameters, util, store, model, auth,
                     permissions, markdown, yaml, ci-spec, ci-model,
@@ -385,5 +387,9 @@ anvil/
                     pages-*, deploy, initialize
   static/           anvil.css, the logo, a little script
   ci/test.lisp      the cold load and smoke test
+  ci/runner-smoke.lisp
+                    the forge with a real executor, for a push from outside
+  ci.sexp, .gitlab-ci.yml
+                    Anvil's own pipeline, in both forms
   dev.lisp          load and start in a development image
 ```

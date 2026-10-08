@@ -228,9 +228,9 @@
        (local (ingot:init-repository root))
        (who (ingot:make-identity "Tester" "tester@example.test"))
        (c1 (ingot:make-commit! local :branch "master" :author who :message "Pushed from Ingot"
-                                     :actions '((:action :create :path "pushed.txt" :content "pushed\n")
-                                                (:action :create :path "ci.sexp"
-                                                 :content "(:pipeline :stages (:test) :jobs ((:check :stage :test :image \"alpine:3\" :script (\"echo hello\"))))\n"))))
+                                     :actions (list (list :action :create :path "pushed.txt" :content (format nil "pushed~%"))
+                                                    (list :action :create :path "ci.sexp"
+                                                          :content (format nil "(:pipeline :stages (:test) :jobs ((:check :stage :test :image \"alpine:3\" :script (\"echo hello\"))))~%")))))
        (project (json (ask "/api/v4/projects" :method :post :token *token*
                                              :content "name=Pushed&path=pushed&visibility=public" :content-type "application/x-www-form-urlencoded"))))
   (check "an empty project for the push" (equal "pushed" (jget project "path")))

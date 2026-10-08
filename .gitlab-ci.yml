@@ -1,0 +1,18 @@
+# Anvil's pipeline on a GitLab: load Ingot and Anvil on a cold Gendl
+# image and work the forge over HTTP (ci/test.lisp says what it does).
+# ci.sexp beside this file is the same pipeline in Anvil's own form.
+
+stages:
+  - test
+
+variables:
+  GIT_DEPTH: "1"
+
+cold-load-and-smoke:
+  stage: test
+  image: genworks/gendl:devo-ccl
+  tags:
+    - common-lisp.net
+  script:
+    - cd /opt/gendl
+    - ANVIL_DIR="$CI_PROJECT_DIR" ./gdl/program/gdl-ccl -n -b --load "$CI_PROJECT_DIR/ci/test.lisp"

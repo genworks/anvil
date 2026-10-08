@@ -165,6 +165,12 @@ a colon followed by a space or the end, outside quotes and brackets."
           ((< (yline-indent line) indent) :null)
           ((sequence-item? content) (parse-block-sequence (yline-indent line)))
           ((mapping-key-end content) (parse-block-mapping (yline-indent line)))
+          ;; a block scalar standing as a sequence item ("- |"): its lines
+          ;; are those indented past the item's own column
+          ((and (member (char content 0) '(#\| #\>))
+                (every (lambda (c) (member c '(#\| #\> #\- #\+ #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9))) content))
+           (incf *yat*)
+           (parse-block-scalar content (1- (yline-indent line))))
           (t (parse-scalar-lines indent)))))
 
 (defun parse-block-sequence (indent)
