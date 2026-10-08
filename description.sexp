@@ -1,0 +1,1 @@
+"Anvil, a software forge in Common Lisp and Gendl: repositories over Git's smart HTTP, issues, merge requests, CI running .gitlab-ci.yml or a native s-expression pipeline, a REST API in GitLab's shapes, OAuth2, and push-button deployment of a project into a hosting house."
