@@ -170,14 +170,58 @@ the body."
   (let ((value (net.aserve:header-slot-value req (if (stringp name) (intern (string-upcase name) :keyword) name))))
     (and (stringp value) (plusp (length value)) value)))
 
+(defun chunked-request? (req)
+  (equalp "chunked" (header req :transfer-encoding)))
+
+(defun read-chunked-request-body (req)
+  "The body of a chunked request (git sends a push of more than a
+megabyte so) as octets, read from the socket chunk by chunk.
+AllegroServe's own reader goes character by character through an
+unchunking stream that this Lisp's streams cannot read from, and the
+2026-10-08 push of gendl (149 MB) took the image down that way.  The
+body is marked read afterwards, so the server does not look for it again."
+  (let ((socket (net.aserve:request-socket req))
+        (buffer (ingot::make-buffer (* 1024 1024))))
+    (labels ((line ()
+               (let ((text (make-array 16 :element-type 'character :adjustable t :fill-pointer 0)))
+                 (loop for byte = (read-byte socket nil nil)
+                       do (cond ((or (null byte) (= byte 10)) (return))
+                                ((= byte 13))
+                                (t (vector-push-extend (code-char byte) text))))
+                 text))
+             (exactly (n)
+               (let ((octets (ingot:make-octets n)) (at 0))
+                 (loop while (< at n)
+                       do (let ((got (read-sequence octets socket :start at)))
+                            (when (<= got at) (http-error 400 "The body ended inside a chunk."))
+                            (setq at got)))
+                 octets)))
+      (loop
+        (let* ((head (line))
+               (size (ignore-errors (parse-integer head :end (or (position #\; head) (length head)) :radix 16))))
+          (when (or (null size) (zerop size))
+            ;; the trailers, up to the empty line
+            (loop for text = (line) while (plusp (length text)))
+            (return))
+          (when (> (+ (fill-pointer buffer) size) *max-request-body*)
+            (http-error 413 "The body is too large."))
+          (ingot::buffer-write buffer (exactly size))
+          (line))))
+    (setf (net.aserve::request-request-body req) "")
+    (ingot::buffer-octets buffer)))
+
 (defun request-body-octets (req)
   "The request's body as octets, inflated when it came gzip-encoded;
 nil when there is none.  Refuses a body over *max-request-body*."
-  (let* ((raw (ignore-errors (net.aserve:get-request-body req)))
-         (octets (and (stringp raw) (plusp (length raw))
-                      (let ((out (ingot:make-octets (length raw))))
-                        (dotimes (i (length raw) out)
-                          (setf (aref out i) (logand #xff (char-code (char raw i)))))))))
+  (let* ((raw (if (chunked-request? req)
+                  (read-chunked-request-body req)
+                  (ignore-errors (net.aserve:get-request-body req))))
+         (octets (cond ((and (typep raw '(vector (unsigned-byte 8))) (plusp (length raw))) raw)
+                       ((and (stringp raw) (plusp (length raw)))
+                        (let ((out (ingot:make-octets (length raw))))
+                          (dotimes (i (length raw) out)
+                            (setf (aref out i) (logand #xff (char-code (char raw i)))))))
+                       (t nil))))
     (when (and octets (> (length octets) *max-request-body*))
       (http-error 413 "The body is too large."))
     (if (and octets (equal (header req :content-encoding) "gzip"))

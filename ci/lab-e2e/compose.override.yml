@@ -6,7 +6,8 @@ services:
     user: "0"
     environment:
       HOME: /home/gendl-user
-    command: ["sh", "-c", "cd /opt/gendl && ./gdl/program/gdl-ccl -n -b --load /kit/anvil-init.lisp"]
+    # not -b: in batch mode an error that escapes a worker thread ends the image
+    command: ["sh", "-c", "cd /opt/gendl && ./gdl/program/gdl-ccl -n --load /kit/anvil-init.lisp"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${ANVIL_DIR}:/anvil:ro
