@@ -10,8 +10,10 @@
 ;;; ci/test.lisp: load Anvil on a COLD Gendl image and work it.
 ;;;
 ;;; Run by the pipeline inside genworks/gendl:devo-ccl or devo-sbcl, an
-;;; image that has never seen this checkout: loads Ingot and Anvil from
-;;; the checkout (a warning in their own files fails the job), runs
+;;; image that has never seen this checkout: loads Ingot (a repository
+;;; of its own: INGOT_DIR, else the checkout beside this one, else
+;;; ingot/ inside it, where the pipeline unpacks it) and Anvil from the
+;;; checkout (a warning in their own files fails the job), runs
 ;;; Ingot's checks, starts the forge on a port of its own with its state
 ;;; in a scratch directory, and then asks it, as a visitor and as a
 ;;; program would: the pages, the API's project, commit, issue and merge
@@ -19,7 +21,7 @@
 ;;; git binary, a pipeline made from a ci.sexp, the OAuth2 flow.
 ;;;
 ;;; Locally, in the image, with ANVIL_DIR naming a checkout:
-;;;   cd /opt/gendl && ANVIL_DIR=/path/to/anvil \
+;;;   cd /opt/gendl && ANVIL_DIR=/path/to/anvil INGOT_DIR=/path/to/ingot \
 ;;;     ./gdl/program/gdl-ccl -n -b --load /path/to/anvil/ci/test.lisp
 ;;;
 
@@ -32,6 +34,15 @@
   (uiop:ensure-directory-pathname
    (or (uiop:getenv "ANVIL_DIR") (uiop:getenv "CI_PROJECT_DIR")
        (error "Set ANVIL_DIR or CI_PROJECT_DIR to the anvil checkout."))))
+
+(defparameter *ingot-dir*
+  (uiop:ensure-directory-pathname
+   (or (let ((env (uiop:getenv "INGOT_DIR"))) (and env (plusp (length env)) env))
+       (let ((beside (merge-pathnames "../ingot/" *anvil-dir*)))
+         (and (probe-file (merge-pathnames "ingot.asd" beside)) beside))
+       (merge-pathnames "ingot/" *anvil-dir*)))
+  "Where Ingot is: INGOT_DIR, else the checkout beside this one, else
+ingot/ inside it, where the pipeline unpacks it.")
 
 (defparameter *test-port* 9097)
 (defparameter *base* (format nil "http://127.0.0.1:~d" *test-port*))
@@ -67,7 +78,7 @@
 (handler-case
     (progn
       (uiop:enable-deferred-warnings-check)
-      (asdf:load-asd (merge-pathnames "ingot/ingot.asd" *anvil-dir*))
+      (asdf:load-asd (merge-pathnames "ingot.asd" *ingot-dir*))
       (asdf:load-asd (merge-pathnames "anvil.asd" *anvil-dir*))
       (handler-bind ((warning #'muffle-warning))
         (ql:quickload (remove-if-not #'stringp
@@ -99,7 +110,7 @@
 
 ;;; Ingot's own checks
 
-(handler-case (load (merge-pathnames "ingot/test/test.lisp" *anvil-dir*))
+(handler-case (load (merge-pathnames "test/test.lisp" *ingot-dir*))
   (error (e) (problem "ingot checks: ~a" e)))
 
 ;;; The forge, on a port of its own, its state in a scratch directory

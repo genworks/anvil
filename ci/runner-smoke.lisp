@@ -13,7 +13,7 @@
 ;;;
 ;;;   docker run -d --name anvil-runner-smoke --user 0 \
 ;;;     -v /var/run/docker.sock:/var/run/docker.sock \
-;;;     -v /path/to/anvil:/anvil:ro -e HOME=/home/gendl-user \
+;;;     -v /path/to/anvil:/anvil:ro -v /path/to/ingot:/ingot:ro -e HOME=/home/gendl-user \
 ;;;     -p 127.0.0.1:9098:9098 genworks/gendl:devo-ccl \
 ;;;     sh -c 'cd /opt/gendl && ./gdl/program/gdl-ccl -n -b --load /anvil/ci/runner-smoke.lisp'
 ;;;
@@ -29,7 +29,7 @@
 (gendl:start-gendl!)
 (load-quicklisp)
 
-(asdf:load-asd "/anvil/ingot/ingot.asd")
+(asdf:load-asd "/ingot/ingot.asd")
 (asdf:load-asd "/anvil/anvil.asd")
 (handler-bind ((warning #'muffle-warning))
   (ql:quickload :anvil :silent t))

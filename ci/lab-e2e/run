@@ -3,6 +3,7 @@
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ANVIL_DIR=${ANVIL_DIR:-$(cd "$HERE/../.." && pwd)}
+INGOT_DIR=${INGOT_DIR:-$ANVIL_DIR/../ingot}
 MONOCLE_DIR=${MONOCLE_DIR:-$ANVIL_DIR/../monocle}
 DEMOS_DIR=${DEMOS_DIR:-$ANVIL_DIR/../demos}
 CLSITE_DEPLOY=${CLSITE_DEPLOY:-$ANVIL_DIR/../../gitlab.clnet/clo/cl-site/clnet/deploy}
@@ -20,6 +21,7 @@ case "${1-}" in
     cat > "$ENV" <<EOF
 COMPOSE_PROJECT_NAME=anvil-e2e
 ANVIL_DIR=$ANVIL_DIR
+INGOT_DIR=$INGOT_DIR
 MONOCLE_DIR=$MONOCLE_DIR
 DEMOS_DIR=$DEMOS_DIR
 CLSITE_DEPLOY=$CLSITE_DEPLOY

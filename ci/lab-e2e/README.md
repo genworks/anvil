@@ -33,7 +33,7 @@ $ ci/lab-e2e/run browser   # the lab's own buttons in headless chromium (see bel
 $ ci/lab-e2e/run down
 ```
 
-`run` reads `ANVIL_DIR`, `MONOCLE_DIR`, `DEMOS_DIR`, `CLSITE_DEPLOY`
+`run` reads `ANVIL_DIR`, `INGOT_DIR`, `MONOCLE_DIR`, `DEMOS_DIR`, `CLSITE_DEPLOY`
 (the clnet `deploy/` directory) and `WORK` (where it keeps the
 secrets, the token and the test repository; `/tmp/anvil-lab-e2e`),
 each with a default beside this checkout.  The forge answers on

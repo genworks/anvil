@@ -10,7 +10,7 @@
 ;;; ci/lab-e2e/anvil-init.lisp: the forge of the lab end-to-end rig
 ;;; (README.md beside this file).  Loaded by the `anvil' service of
 ;;; compose.override.yml in a Gendl image that mounts this checkout at
-;;; /anvil, Monocle at /monocle and the Docker socket.  Its state is in
+;;; /anvil, Ingot's at /ingot, Monocle at /monocle and the Docker socket.  Its state is in
 ;;; the container's /tmp, so a restart of the container finds it again:
 ;;; everything below is idempotent.
 ;;;
@@ -20,7 +20,7 @@
 (gendl:start-gendl!)
 (load-quicklisp)
 
-(asdf:load-asd "/anvil/ingot/ingot.asd")
+(asdf:load-asd "/ingot/ingot.asd")
 (asdf:load-asd "/anvil/anvil.asd")
 (pushnew #p"/monocle/" asdf:*central-registry* :test #'equal)
 (handler-bind ((warning #'muffle-warning))

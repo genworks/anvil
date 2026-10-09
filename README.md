@@ -10,11 +10,14 @@ into a house that hosts applications.  Built first for
 exactly these features of GitLab, so that what talks to GitLab there
 keeps working when pointed at Anvil.
 
-Git itself is **[Ingot](ingot/)**, a Git implementation in plain Common
-Lisp that lives in this repository as a system of its own: loose and
-packed objects (deltas included), refs, trees, commits, diffs,
-three-way merges, the smart protocol's server side, archives.  No
-subprocess and no `git` binary anywhere.
+Git itself is **[Ingot](https://gitlab.common-lisp.net/clo/ingot)**,
+a Git implementation in plain Common Lisp and a repository of its own,
+which Anvil takes as a dependency: loose and packed objects (deltas
+included), refs, trees, commits, diffs, three-way merges, the smart
+protocol on both sides, archives.  No subprocess and no `git` binary
+anywhere.  Anvil finds it in `INGOT_DIR`, else in a checkout beside
+this one (`../ingot/`), else in `ingot/` inside it, where the pipeline
+unpacks it.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the design.
 
@@ -129,9 +132,10 @@ clients by their user agent and challenges anything else.
 
 ## Checks
 
-Ingot's own: load `ingot/test/test.lisp` into an image that has the
-system loaded (`INGOT_REPO=/path/to/some/.git` makes it read a real
-repository too).  Anvil's cold load and smoke test is `ci/test.lisp`,
+Ingot's own, in its repository: `test/test.lisp` into an image that
+has the system loaded (`INGOT_REPO=/path/to/some/.git` makes it read a
+real repository too), or its `ci/test.lisp` cold.  Anvil's cold load
+and smoke test is `ci/test.lisp`,
 run by the pipeline inside a Gendl image that has never seen the
 checkout.
 

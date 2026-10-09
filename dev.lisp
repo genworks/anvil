@@ -14,8 +14,15 @@
 
 (unless (find-package :quicklisp) (load-quicklisp))
 
-(let ((here (make-pathname :name nil :type nil :defaults (or *load-truename* *compile-file-truename*))))
-  (pushnew (merge-pathnames "ingot/" here) asdf:*central-registry* :test #'equal)
+(let* ((here (make-pathname :name nil :type nil :defaults (or *load-truename* *compile-file-truename*)))
+       ;; Ingot is a repository of its own (clo/ingot): INGOT_DIR, else
+       ;; the checkout beside this one, else ingot/ inside it
+       (ingot (or (let ((env (uiop:getenv "INGOT_DIR")))
+                    (and env (plusp (length env)) (uiop:ensure-directory-pathname env)))
+                  (let ((beside (merge-pathnames "../ingot/" here)))
+                    (and (probe-file (merge-pathnames "ingot.asd" beside)) beside))
+                  (merge-pathnames "ingot/" here))))
+  (pushnew ingot asdf:*central-registry* :test #'equal)
   (pushnew here asdf:*central-registry* :test #'equal))
 
 (ql:quickload :anvil :silent t)

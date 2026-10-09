@@ -1,4 +1,8 @@
 bin/
+# Ingot is a repository of its own (clo/ingot); the pipeline unpacks it here
+/ingot/
+# Quicklisp's index of a local-projects checkout, generated
+system-index.txt
 *.fasl
 *.lx64fsl
 *.dx64fsl

@@ -11,6 +11,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${ANVIL_DIR}:/anvil:ro
+      - ${INGOT_DIR}:/ingot:ro
       - ${MONOCLE_DIR}:/monocle:ro
       - ${ANVIL_DIR}/ci/lab-e2e:/kit:ro
       - ${WORK}/hosting-secret:/run/anvil-hosting-secret:ro
