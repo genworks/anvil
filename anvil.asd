@@ -5,7 +5,7 @@
 (asdf:defsystem #:anvil :description
  "The Gendl™ Anvil, a software forge in Common Lisp and Gendl: repositories over Git's smart HTTP, issues, merge requests, CI running .gitlab-ci.yml or a native s-expression pipeline, a REST API in GitLab's shapes, OAuth2, and push-button deployment of a project into a hosting house."
  :author "Genworks International" :license "AGPL-3.0-or-later"
- :serial t :version "20261007" :depends-on
+ :serial t :version "20261008" :depends-on
  (:ingot :cl-who :cl-ppcre :yason :cl-base64 :flexi-streams :babel
   :bordeaux-threads :3bmd)
  :components
@@ -15,10 +15,10 @@
   (:file "source/markdown") (:file "source/yaml")
   (:file "source/ci-spec") (:file "source/ci-model")
   (:file "source/docker") (:file "source/hooks")
-  (:file "source/runner") (:file "source/deploy")
-  (:file "source/git-http") (:file "source/oauth")
-  (:file "source/api") (:file "source/pages-base")
-  (:file "source/pages-site") (:file "source/pages-project")
-  (:file "source/pages-repo") (:file "source/pages-issues")
-  (:file "source/pages-ci") (:file "source/pages-settings")
-  (:file "source/initialize")))
+  (:file "source/import") (:file "source/runner")
+  (:file "source/deploy") (:file "source/git-http")
+  (:file "source/oauth") (:file "source/api")
+  (:file "source/pages-base") (:file "source/pages-site")
+  (:file "source/pages-project") (:file "source/pages-repo")
+  (:file "source/pages-issues") (:file "source/pages-ci")
+  (:file "source/pages-settings") (:file "source/initialize")))

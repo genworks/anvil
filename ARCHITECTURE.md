@@ -66,7 +66,8 @@ writes the repository itself:
   (the commands, the pack, which may be thin, every delta resolved so
   that each entry has its id, kept packed with its index, the refs
   updated, the `report-status`).  Both are functions from octets to octets, so the
-  HTTP layer is thin and the same code could serve ssh one day.
+  HTTP layer is thin and the same code could serve ssh one day.  The
+  client side of a fetch, over a transport the caller lends (below).
 - **Archives.** A tree at a commit as a tar (ustar) or tar.gz, which is
   also how the CI runner hands a job its working tree.
 
@@ -364,6 +365,32 @@ project page also shows, read from the tree, whether the project
 meets the profile (the two files there, no faults), so that an author
 sees what is missing before pressing anything.
 
+## Fetching, and importing from GitLab
+
+Ingot has the client side of a fetch as well (`fetch!`): the refs
+advertisement read, every branch and tag the repository lacks asked
+for in one round (what is here already is told as `have`s, so a second
+fetch brings only what is new), the pack taken through `store-pack!`,
+the refs set and pruned, HEAD pointed where the server's points.  Ingot
+knows no HTTP: the fetch takes a transport, a function of a service
+keyword and a request body answering the server's octets, and the
+forge lends it AllegroServe's client (`http-git-transport` in
+`import.lisp`).  That transport calls itself `git/anvil-import`:
+common-lisp.net's bot challenge (Anubis) passes a git client by its
+user agent and challenges anything else.
+
+On that stands the import from a GitLab (`import-from-gitlab!`): a
+group made here as it is there with its projects, or single projects;
+each repository fetched, the issues and merge requests read through
+GitLab's REST API with their notes and written as the same records a
+native one has, numbers kept so that a link which worked there works
+here, and `:imported-from` on each saying where it came from.  People
+are not imported: a user of the same username here is matched, and
+what has no author here is authored by the importing user with a
+first line naming who wrote it there and when.  Importing again is
+safe: a repository is brought up to date and only what is not here yet
+is added.
+
 ## Webhooks and mirrors
 
 A webhook is an address, a secret token and a list of events (`push`,
@@ -405,7 +432,7 @@ anvil/
     ingot.asd       written by hand
   source/           package, parameters, util, store, model, auth,
                     permissions, markdown, yaml, ci-spec, ci-model,
-                    docker, runner, hooks, git-http, api, oauth,
+                    docker, runner, hooks, import, git-http, api, oauth,
                     pages-*, deploy, initialize
   static/           anvil.css, the logo, a little script
   ci/test.lisp      the cold load and smoke test

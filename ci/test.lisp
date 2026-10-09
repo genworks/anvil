@@ -290,6 +290,37 @@
           (check "the job page" (eql 200 (nth-value 1 (ask (format nil "/tester/pushed/-/jobs/~d" (jget job "id"))))))
           (check "the trace" (stringp (ask (format nil "/api/v4/projects/2/jobs/~d/trace" (jget job "id"))))))))))
 
+;;; The client side: the pushed project fetched back through Ingot's
+;;; own client over the forge's transport, and a project imported from
+;;; the forge itself, which answers in GitLab's shapes.
+
+(let ((fetched (ingot:init-repository (merge-pathnames "fetched-repo.git/" *scratch*)))
+      (transport (uiop:symbol-call :anvil :http-git-transport (format nil "~a/tester/pushed.git" *base*))))
+  (multiple-value-bind (set deleted received)
+      (handler-case (ingot:fetch! fetched transport)
+        (error (e) (problem "fetch: ~a" e) (values nil nil 0)))
+    (check "a fetch through Ingot's client brings the push back" (and (= 1 (length set)) (null deleted) (= received 4)))
+    (check "the fetched tree has the pushed file"
+           (ignore-errors (search "pushed" (ingot:octets-to-string (ingot:blob-at fetched (ingot:head-oid fetched) "pushed.txt")))))
+    (check "a second fetch brings nothing"
+           (multiple-value-bind (set deleted received) (ingot:fetch! fetched transport)
+             (and (null set) (null deleted) (zerop received))))))
+
+(let ((reports (handler-case (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/smoke") :into "imported")
+                 (error (e) (problem "import: ~a" e) nil))))
+  (check "the import reports the project" (equal "imported/smoke" (getf (first reports) :project)))
+  (check "the imported project's page" (eql 200 (nth-value 1 (ask "/imported/smoke"))))
+  (check "the imported repository carries the merged file"
+         (search "# Notes" (ask "/api/v4/projects/imported%2Fsmoke/repository/files/NOTES.md/raw?ref=master")))
+  (let ((issue (json (ask "/api/v4/projects/imported%2Fsmoke/issues/1"))))
+    (check "the imported issue keeps its number and its state" (and (eql 1 (jget issue "iid")) (equal "closed" (jget issue "state"))))
+    (check "the imported issue's note came along" (eql 1 (jget issue "user_notes_count"))))
+  (check "the imported merge request is merged"
+         (equal "merged" (jget (json (ask "/api/v4/projects/imported%2Fsmoke/merge_requests/1")) "state")))
+  (check "importing again adds nothing"
+         (let ((again (ignore-errors (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/smoke") :into "imported"))))
+           (and again (eql 0 (getf (first again) :issues)) (eql 0 (getf (first again) :merge-requests))))))
+
 ;;; The YAML reader on a real .gitlab-ci.yml
 
 (let ((spec (handler-case (uiop:symbol-call :anvil :read-gitlab-ci "

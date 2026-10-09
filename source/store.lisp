@@ -166,6 +166,17 @@ project's own sequences), kept across restarts."
         (write-sexp-file (counters-file) all))
       value)))
 
+(defun ensure-counter! (name value)
+  "The sequence NAME continues above VALUE from now on: an import keeps
+the numbers things had.  Answers the counter."
+  (with-store ()
+    (when (< (gethash name *counters* 0) value)
+      (setf (gethash name *counters*) value)
+      (let ((all nil))
+        (maphash (lambda (k v) (push (list k v) all)) *counters*)
+        (write-sexp-file (counters-file) all)))
+    (gethash name *counters*)))
+
 (defun new-record (kind &rest keys-and-values)
   "A fresh record of KIND with an id of its own and :created, not yet
 saved."

@@ -33,4 +33,10 @@
            #:find-user
            #:find-project
            #:run-pipeline!
+           #:import-from-gitlab!
+           #:import-gitlab-group!
+           #:import-gitlab-project!
+           #:make-gitlab-client
+           #:fetch-repository!
+           #:http-git-transport
            #:anvil-site))

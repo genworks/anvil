@@ -1,1 +1,1 @@
-("package" "parameters" "util" "store" "auth" "model" "permissions" "markdown" "yaml" "ci-spec" "ci-model" "docker" "hooks" "runner" "deploy" "git-http" "oauth" "api" "pages-base" "pages-site" "pages-project" "pages-repo" "pages-issues" "pages-ci" "pages-settings" "initialize")
+("package" "parameters" "util" "store" "auth" "model" "permissions" "markdown" "yaml" "ci-spec" "ci-model" "docker" "hooks" "import" "runner" "deploy" "git-http" "oauth" "api" "pages-base" "pages-site" "pages-project" "pages-repo" "pages-issues" "pages-ci" "pages-settings" "initialize")

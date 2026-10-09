@@ -101,6 +101,32 @@ Deployments page follows the request to its address.  A `:deploy` job
 does the same at the end of a green pipeline, and a project may ask to
 be deployed on every green pipeline of its default branch.
 
+## Importing from GitLab
+
+A group with its projects, or single projects, can be brought over
+from a GitLab: the repositories through Ingot's fetch (every branch
+and tag, HEAD too), the issues and merge requests with their notes
+through GitLab's API, their numbers kept so that a link which worked
+there works here.
+
+```lisp
+(anvil:import-from-gitlab! "https://gitlab.common-lisp.net"
+                           :token "<a personal access token with read_api>"  ; public things need none
+                           :groups '("clo" ("alexandria" "alexandria"))      ; a group whole, or some of its projects
+                           :projects '("someone/a-project"))                   ; single projects, into the namespace of that path
+```
+
+People are not imported.  What has no author here is authored by the
+importing user (the first administrator, unless `:importer` names
+another), and its text begins with a line saying who wrote it there
+and when; a user of the same username here is matched instead.
+Importing again brings a repository up to date and adds only the
+issues and merge requests not here yet.  `:into "a-group"` puts single
+projects under one group here; `:auth '("oauth2" . "<token>")` fetches
+repositories that are not public.  The fetch calls itself
+`git/anvil-import`, because common-lisp.net's bot challenge passes git
+clients by their user agent and challenges anything else.
+
 ## Checks
 
 Ingot's own: load `ingot/test/test.lisp` into an image that has the
