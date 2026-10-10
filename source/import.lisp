@@ -128,6 +128,12 @@ followed through X-Next-Page, as one list."
                         (and (stringp body)
                              (let ((json (ignore-errors (parse-json body))))
                                (and (hash-table-p json) (json-get json "message"))))))
+               ;; common-lisp.net's bot challenge (Anubis) answers anonymous
+               ;; API calls with a 200 page of HTML; a token gets JSON
+               (let ((type (cdr (assoc :content-type headers))))
+                 (unless (and type (search "json" type))
+                   (error "~a answered ~a to ~a, not JSON: ~:[a bot challenge, most likely; pass :token (a personal access token with read_api)~;a challenge page or a sign-in~]."
+                          (getf client :url) (or type "no content type") path (getf client :token))))
                (values (parse-json body)
                        (let ((next (cdr (assoc :x-next-page headers))))
                          (and (stringp next) (plusp (length next)) (ignore-errors (parse-integer next)))))))))
