@@ -27,6 +27,10 @@
            #:*runner-parallelism*
            #:*docker-socket*
            #:*deploy-houses*
+           #:*read-only?*
+           #:*read-only-text*
+           #:read-only-environment?
+           #:*registration-open?*
            #:make-user!
            #:make-group!
            #:make-project!

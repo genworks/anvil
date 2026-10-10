@@ -33,6 +33,8 @@
       anvil:*docker-socket* "/var/run/docker.sock"
       anvil:*runner-tags* '("docker")
       anvil:*runner-parallelism* 2
+      ;; ANVIL_READ_ONLY, non-empty, for a forge that only shows (README.md)
+      anvil:*read-only?* (anvil:read-only-environment?)
       ;; the house: the lab on the same network, the secret the rig made
       anvil:*deploy-houses* '((:key :common-lisp.app :name "common-lisp.app"
                                :lab-url "http://lab:9080/prompt-lab"

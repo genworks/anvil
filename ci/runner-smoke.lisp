@@ -39,7 +39,9 @@
       anvil:*hosts* nil
       anvil:*docker-socket* "/var/run/docker.sock"
       anvil:*runner-tags* '("docker")
-      anvil:*runner-parallelism* 2)
+      anvil:*runner-parallelism* 2
+      ;; ANVIL_READ_ONLY, non-empty, for a forge that only shows (README.md)
+      anvil:*read-only?* (anvil:read-only-environment?))
 
 (anvil:start! :port (or (ignore-errors (parse-integer (uiop:getenv "ANVIL_PORT"))) 9098))
 

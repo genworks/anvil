@@ -30,7 +30,8 @@
                                               do (htm (:a :class (if (eq key state) "active" "") :href (format nil "~a/-/~a?state=~(~a~)" url segment key) (hs name))))
                                         (when label (htm (:span :class "label" (hs label)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
                                         (when (if issue? (can? :create-issue project) (can? :create-merge-request project))
-                                          (htm (:a :class "btn btn-small" :style "margin-left:auto" :href (format nil "~a/-/~a/new" url segment) (if issue? "New issue" "New merge request")))))
+                                          (htm (str (mutating-link (format nil "~a/-/~a/new" url segment) (if issue? "New issue" "New merge request")
+                                                                   :class "btn btn-small" :style "margin-left:auto")))))
                                       (str (the-object site (table '("" "Title" "Author" "Opened" "Notes")
                                                                    (mapcar (lambda (thing)
                                                                              (list (the-object site (status-badge (getf thing :state)))
@@ -119,7 +120,7 @@
                                                        (htm (str (the-object site (button (if open? (if issue? "Close issue" "Close merge request") "Reopen") :class "btn btn-quiet"
                                                                                           :formaction (format nil "~a/~a" base (if open? "close" "reopen")))))))))))
                                           (when (and (not (can? :create-note project)) (not *current-user*))
-                                            (htm (:p :class "hint" (:a :href (format nil "/users/sign_in?return_to=~a" (url-encode base)) "Sign in") " to comment."))))
+                                            (htm (:p :class "hint" (str (mutating-link (format nil "/users/sign_in?return_to=~a" (url-encode base)) "Sign in")) " to comment."))))
                                         (:aside
                                           (str (the-object site (card (html (:dl :class "kv"
                                                                               (:dt "State") (:dd (hs (status-text (getf thing :state))))

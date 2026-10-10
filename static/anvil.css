@@ -77,6 +77,11 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5rem 0; }
 .btn-quiet:hover { background: var(--band); color: var(--ink); }
 .btn-danger { background: var(--bad); }
 .btn-small { padding: .3rem .7rem; font-size: .9rem; }
+/* a read-only forge: the controls stay where they are, greyed and inert */
+fieldset.read-only { display: contents; }
+fieldset.read-only :is(button, input, select, textarea), .disabled { opacity: .5; cursor: not-allowed; }
+.btn.disabled:hover { background: var(--accent); }
+.btn-quiet.disabled:hover { background: var(--surface); }
 .actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
 .quiet { color: var(--muted); }
 .hint { color: var(--muted); font-size: .9rem; margin: .25rem 0 0; }

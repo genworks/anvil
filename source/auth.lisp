@@ -160,7 +160,8 @@ then the session cookie."
              (when token
                (let ((user (record :user (getf token :user-id))))
                  (when (and user (user-active? user))
-                   (unless (eql (getf token :last-used) (iso-date-number))
+                   ;; a read-only forge writes nothing for a request
+                   (unless (or *read-only?* (eql (getf token :last-used) (iso-date-number)))
                      (ignore-errors (update-record! token :last-used (iso-date-number))))
                    (return-from authenticate (values user token nil))))))))
     (let ((private (header req :private-token)))

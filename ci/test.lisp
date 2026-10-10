@@ -435,6 +435,129 @@ deploy:
 (check "a stranger may not push" (eql 403 (nth-value 1 (ask "/api/v4/projects/1/repository/commits" :method :post :token *second-token* :content-type "application/json"
                                                            :content "{\"branch\":\"master\",\"commit_message\":\"x\",\"actions\":[{\"action\":\"create\",\"file_path\":\"x\",\"content\":\"x\"}]}"))))
 
+;;; Read-only: the same forge with *read-only?* on between requests.
+;;; Browsing and fetching answer; every change over HTTP is refused
+;;; whoever asks, the controls are greyed, and the REPL still writes.
+
+(defun read-only! (on?)
+  (setf (symbol-value (find-symbol "*READ-ONLY?*" :anvil)) on?))
+
+(defun refused? (status body &key (expected 403))
+  (and (eql status expected) (stringp body) (search "read-only" body) t))
+
+(defun form-request (path content &rest keys)
+  (apply #'ask path :method :post :content content :content-type "application/x-www-form-urlencoded" keys))
+
+(check "off: the sign-in form is not greyed" (not (search "fieldset class=\"read-only\"" (ask "/users/sign_in"))))
+(read-only! t)
+
+;; reading
+(check "read-only: the home page" (eql 200 (nth-value 1 (ask "/"))))
+(check "read-only: explore" (eql 200 (nth-value 1 (ask "/explore"))))
+(check "read-only: the project page" (eql 200 (nth-value 1 (ask "/tester/smoke"))))
+(check "read-only: the blob page" (eql 200 (nth-value 1 (ask "/tester/smoke/-/blob/master/README.md"))))
+(check "read-only: the issue page" (eql 200 (nth-value 1 (ask "/tester/smoke/-/issues/1"))))
+(check "read-only: the API reads" (equal "tester/smoke" (jget (json (ask "/api/v4/projects/tester%2Fsmoke")) "path_with_namespace")))
+(check "read-only: the API reads with a token" (equal "tester" (jget (json (ask "/api/v4/user" :token *token*)) "username")))
+(check "read-only: an archive" (let ((octets (ask-octets "/tester/smoke/-/archive/master/smoke-master.tar.gz")))
+                                 (and (vectorp octets) (= (aref octets 0) #x1f))))
+(let ((fetched (ingot:init-repository (merge-pathnames "read-only-fetch.git/" *scratch*))))
+  (check "read-only: a fetch over the smart protocol"
+         (handler-case (plusp (nth-value 2 (ingot:fetch! fetched (uiop:symbol-call :anvil :http-git-transport (format nil "~a/tester/smoke.git" *base*)))))
+           (error (e) (problem "read-only fetch: ~a" e)))))
+
+;; the web's changes, refused as a page
+(multiple-value-bind (body status headers) (form-request "/users/sign_in" "login=tester&password=password-of-tester")
+  (check "read-only: sign-in refused, no session" (and (refused? status body) (search "<h1>Read-only for now</h1>" body)
+                                                       (null (assoc :set-cookie headers)))))
+(multiple-value-bind (body status) (form-request "/users/sign_up" "username=newcomer&name=N&email=n%40example.test&password=password-of-newcomer&password_confirmation=password-of-newcomer")
+  (check "read-only: sign-up refused" (and (refused? status body) (null (uiop:symbol-call :anvil :find-user "newcomer")))))
+(multiple-value-bind (body status) (form-request "/-/profile/tokens" "name=t&scopes=api" :cookie? t)
+  (check "read-only: a token refused, signed in" (refused? status body)))
+(multiple-value-bind (body status) (form-request "/projects/new" "name=Nope&path=nope&visibility=public" :cookie? t)
+  (check "read-only: a web project refused" (and (refused? status body) (null (uiop:symbol-call :anvil :find-project "tester/nope")))))
+(multiple-value-bind (body status) (form-request "/tester/smoke/-/issues/new" "title=Nope" :cookie? t)
+  (check "read-only: a web issue refused" (refused? status body)))
+(multiple-value-bind (body status) (form-request "/tester/smoke/-/issues/1/notes" "body=Nope" :cookie? t)
+  (check "read-only: a comment refused" (refused? status body)))
+(multiple-value-bind (body status) (form-request "/tester/smoke/-/edit/master/README.md" "content=x&message=x" :cookie? t)
+  (check "read-only: a web edit refused" (refused? status body)))
+(multiple-value-bind (body status) (form-request "/tester/smoke/-/settings" "name=Renamed" :cookie? t)
+  (check "read-only: settings refused" (refused? status body)))
+(multiple-value-bind (body status) (ask "/tester/smoke/-/deployments" :cookie? t)
+  (check "read-only: the deployments page refused" (refused? status body)))
+(check "read-only: the README is as it was" (search "Edited on the web" (ask "/api/v4/projects/1/repository/files/README.md/raw?ref=master")))
+
+;; the API's writes and OAuth, refused as JSON
+(multiple-value-bind (body status) (form-request "/api/v4/projects" "name=Nope&path=nope2" :token *token*)
+  (check "read-only: an API project refused" (and (refused? status body) (jget (json body) "message"))))
+(multiple-value-bind (body status) (ask "/api/v4/projects/1/issues" :method :post :token *token* :content-type "application/json" :content "{\"title\":\"Nope\"}")
+  (check "read-only: an API issue refused" (refused? status body)))
+(multiple-value-bind (body status) (ask "/api/v4/projects/1/issues/1" :method :put :token *token*
+                                                                       :content "state_event=reopen" :content-type "application/x-www-form-urlencoded")
+  (check "read-only: an API PUT refused" (and (refused? status body)
+                                               (equal "closed" (jget (json (ask "/api/v4/projects/1/issues/1")) "state")))))
+(check "read-only: an API DELETE refused" (eql 403 (nth-value 1 (ask "/api/v4/projects/1/repository/branches/feature" :method :delete :token *token*))))
+(multiple-value-bind (body status) (form-request "/oauth/token" "grant_type=authorization_code&code=x&redirect_uri=x&client_id=x")
+  (check "read-only: no OAuth token" (and (refused? status body) (equal "access_denied" (jget (json body) "error")))))
+(check "read-only: the OAuth consent refused" (refused? (nth-value 1 (ask "/oauth/authorize?client_id=x" :cookie? t)) (ask "/oauth/authorize?client_id=x" :cookie? t)))
+
+;; a push with an administrator's credentials, refused at both steps
+(let ((master (jget (json (ask "/api/v4/projects/1/repository/branches/master")) "commit")))
+  (multiple-value-bind (body status) (ask "/tester/smoke.git/info/refs?service=git-receive-pack" :basic (cons "tester" "password-of-tester"))
+    (check "read-only: the push advertisement refused, as text" (and (refused? status body) (not (search "report-status" body)))))
+  (multiple-value-bind (answer status)
+      (ask-octets "/tester/smoke.git/git-receive-pack" :method :post :basic (cons "tester" *token*)
+                                                        :content (ingot:string-to-octets "0000") :content-type "application/x-git-receive-pack-request")
+    (check "read-only: a receive-pack refused, not a 500" (and (eql status 403) (search (ingot:string-to-octets "read-only") answer))))
+  (check "read-only: master did not move" (equal (jget master "id") (jget (jget (json (ask "/api/v4/projects/1/repository/branches/master")) "commit") "id"))))
+
+;; the controls, greyed and not hidden
+(let ((sign-in (ask "/users/sign_in"))
+      (home (ask "/"))
+      (issue (ask "/tester/smoke/-/issues/1" :cookie? t))
+      (blob (ask "/tester/smoke/-/blob/master/README.md" :cookie? t)))
+  (check "read-only: the sign-in form is there, greyed"
+         (and (search "<fieldset class=\"read-only\" disabled=\"disabled\" title=\"This forge is read-only for now.\">" sign-in)
+              (cl-ppcre:scan "name=['\"]password['\"]" sign-in)))
+  (check "read-only: the bar's Sign in is greyed, not a link"
+         (and (cl-ppcre:scan "aria-disabled=['\"]true['\"][^>]*>Sign in</span>" home)
+              (not (cl-ppcre:scan "href=['\"]/users/sign_in" home))))
+  (check "read-only: the comment form is there, greyed, signed in"
+         (and (cl-ppcre:scan "name=['\"]body['\"]" issue) (search "fieldset class=\"read-only\" disabled" issue)))
+  (let ((forms (cl-ppcre:all-matches-as-strings "<form [^>]*method=['\"]post['\"][^>]*>" issue))
+        (greyed (cl-ppcre:count-matches "fieldset class=\"read-only\" disabled" issue)))
+    (unless (check "read-only: every POST form on the issue page is greyed" (and forms (= (length forms) greyed)))
+      (format t "      ~d greyed; the forms:~%~{        ~a~%~}" greyed forms)))
+  (check "read-only: the Edit button is greyed" (and (search ">Edit</span>" blob) (not (search "/-/edit/master/README.md" blob)))))
+
+;; the REPL still writes: a user, a commit, a mirror refresh, an import
+(check "read-only: make-user! at the REPL"
+       (getf (uiop:symbol-call :anvil :make-user! "operator" "Operator" "operator@example.test" "password-of-operator") :id))
+(let* ((project (uiop:symbol-call :anvil :find-project "tester/smoke"))
+       (repository (uiop:symbol-call :anvil :project-repository project)))
+  (ingot:make-commit! repository :branch "master" :author (ingot:make-identity "Operator" "operator@example.test") :message "From the REPL"
+                                 :actions (list (list :action :create :path "operator.txt" :content (format nil "operator~%"))))
+  (uiop:symbol-call :anvil :refresh-project-view! project))
+(check "read-only: a mirror refresh at the REPL"
+       (handler-case
+           (multiple-value-bind (set deleted received)
+               (uiop:symbol-call :anvil :fetch-repository! (uiop:symbol-call :anvil :find-project "imported/smoke") (format nil "~a/tester/smoke.git" *base*))
+             (declare (ignore deleted))
+             (and set (plusp received)
+                  (search "operator" (ask "/api/v4/projects/imported%2Fsmoke/repository/files/operator.txt/raw?ref=master"))))
+         (error (e) (problem "read-only mirror refresh: ~a" e))))
+(check "read-only: an import at the REPL"
+       (let ((reports (ignore-errors (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/pushed") :into "readonly-import"))))
+         (and (equal "readonly-import/pushed" (getf (first reports) :project))
+              (eql 200 (nth-value 1 (ask "/readonly-import/pushed"))))))
+
+(read-only! nil)
+(check "off again: the API writes" (integerp (jget (json (ask "/api/v4/projects/1/issues" :method :post :token *token* :content-type "application/json"
+                                                                                  :content "{\"title\":\"After read-only\"}"))
+                                                   "iid")))
+(check "off again: a push advertisement" (search "report-status" (ask "/tester/smoke.git/info/refs?service=git-receive-pack" :basic (cons "tester" *token*))))
+
 ;;; The deployment door, against a house that is not there
 
 (check "the profile report finds the files missing"

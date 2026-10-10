@@ -40,6 +40,23 @@ repositories/, ci/ (traces, artifacts, caches).")
   "Boolean. Whether anyone may make an account at /users/sign_up.  Off,
 an administrator makes accounts.")
 
+(defvar *read-only?* nil
+  "Boolean. Whether the forge only shows: anonymous browsing as ever,
+and every mutation over HTTP (accounts, tokens, projects, issues, merge
+requests, settings, the API's writes, OAuth, a push) refused, with its
+controls greyed.  Functions called at the REPL still write, so an
+operator can load and refresh a read-only forge.  Set when the
+environment variable ANVIL_READ_ONLY is non-empty.")
+
+(defvar *read-only-text* "This forge is read-only for now."
+  "String. What a refusal says, and the title of a greyed control.")
+
+(defun read-only-environment? ()
+  "Whether the environment asks for a read-only forge: ANVIL_READ_ONLY
+set and non-empty."
+  (let ((flag (uiop:getenv "ANVIL_READ_ONLY")))
+    (and flag (plusp (length flag)) t)))
+
 (defvar *default-visibility* :public)
 
 (defvar *default-branch-name* "master"

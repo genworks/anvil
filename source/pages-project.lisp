@@ -33,7 +33,7 @@
                      (if (member (getf *current-user* :id) (getf project :stars)) "★ Unstar" "☆ Star")
                      " " (hs (princ-to-string (or (getf project :star-count) 0)))))))
           (when (and level (>= level 40) *deploy-houses*)
-            (htm (:a :class "btn btn-small" :href (format nil "~a/-/deployments" url) "Deploy")))
+            (htm (str (mutating-link (format nil "~a/-/deployments" url) "Deploy" :class "btn btn-small"))))
           (when (and level (>= level 40))
             (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/settings" url) "Settings")))))
       (str (the-object site (tabs (remove nil
@@ -101,7 +101,7 @@
                                         (htm (:p :class "profile-ok" "✓ Meets the hosting profile"
                                                  (when (getf report :name) (htm " as " (:code (hs (getf report :name))))))
                                              (when (can? :deploy project)
-                                               (htm (:p (:a :class "btn btn-small" :href (format nil "~a/-/deployments" url) "Deploy"))))))
+                                               (htm (:p (str (mutating-link (format nil "~a/-/deployments" url) "Deploy" :class "btn btn-small")))))))
                                        (t (htm (:p :class "profile-bad" "✗ Not yet in the hosting profile")
                                                (:ul :class "faults" (dolist (fault faults) (htm (:li (hs fault)))))
                                                (:p :class "hint" "An " (:code "image.sexp") " and a " (:code "monetize.sexp") " at the root; the house's profile says the rest.")))))
@@ -220,7 +220,7 @@ that changed it."
                                                                                      (if (string= name default) ""
                                                                                          (html (:a :href (format nil "~a/-/compare?from=~a&to=~a" url (url-encode default) (url-encode name)) "compare")
                                                                                                (when (can? :create-merge-request project)
-                                                                                                 (htm " · " (:a :href (format nil "~a/-/merge_requests/new?source=~a" url (url-encode name)) "merge request")))))
+                                                                                                 (htm " · " (str (mutating-link (format nil "~a/-/merge_requests/new?source=~a" url (url-encode name)) "merge request"))))))
                                                                                      (if (and (not (string= name default)) (can-push-branch? project name))
                                                                                          (html (:form :method "post" :action (format nil "~a/-/branches/~a/delete" url (url-encode name))
                                                                                                  (str (the-object site (button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete the branch ~a?" name))))))
@@ -379,7 +379,8 @@ that changed it."
                                           (:span "Compare") (:input :type "text" :name "from" :value from-ref) (:span "with") (:input :type "text" :name "to" :value to-ref)
                                           (str (the-object site (button "Compare" :class "btn btn-small"))))
                                         (when (and (can? :create-merge-request project) commits)
-                                          (htm (:p (:a :class "btn btn-small" :href (format nil "~a/-/merge_requests/new?source=~a&target=~a" url (url-encode to-ref) (url-encode from-ref)) "Open a merge request"))))
+                                          (htm (:p (str (mutating-link (format nil "~a/-/merge_requests/new?source=~a&target=~a" url (url-encode to-ref) (url-encode from-ref)) "Open a merge request"
+                                                                       :class "btn btn-small")))))
                                         (:h3 (hs (plural (length commits) "commit")))
                                         (str (commit-list-html site project commits))
                                         (:h3 (hs (plural (length changes) "file")) " changed")

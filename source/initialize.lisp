@@ -215,12 +215,46 @@
                 (delete-post req ent project ref path)))
              (t (not-found "No such page.")))))))))
 
+;;; Read-only: one gate in front of the dispatcher, so that a mutation
+;;; is refused whichever page or program sent it
+
+(defun read-only-refused? (req)
+  "Whether a read-only forge refuses REQ: every method but GET and HEAD
+(a fetch's POST to git-upload-pack aside), all of OAuth, the
+advertisement that opens a push, and the deployments page, which
+asks the house and writes what it hears."
+  (let ((path (request-path req)))
+    (or (and (not (member (http-method req) '(:get :head)))
+             (not (ends-with? "/git-upload-pack" path)))
+        (starts-with? "/oauth/" path)
+        (and (ends-with? "/info/refs" path) (equal (url-query-value req "service") "git-receive-pack"))
+        (ends-with? "/-/deployments" path))))
+
+(defun refuse-read-only (req ent)
+  "Answer REQ with the read-only refusal, in the form its asker reads:
+plain text for git, JSON for the API and OAuth, else a page."
+  (let ((path (request-path req)))
+    (cond ((or (ends-with? "/info/refs" path) (ends-with? "/git-receive-pack" path))
+           (respond-text req ent (format nil "~a Pushes are refused.~%" *read-only-text*) :status 403))
+          ((starts-with? "/api/" path)
+           (respond-error-json req ent 403 (format nil "403 Forbidden - ~a" *read-only-text*)))
+          ((or (starts-with? "/oauth/token" path) (starts-with? "/oauth/revoke" path))
+           (respond-json req ent (json-table "error" "access_denied" "error_description" *read-only-text*) :status 403))
+          (t (respond-html req ent (the-object (site) (page "Read-only"
+                                                            (html (:div :class "narrow"
+                                                                    (:h1 "Read-only for now")
+                                                                    (:p (hs *read-only-text*) " Browsing works; nothing can be changed here.")
+                                                                    (:p (:a :class "btn" :href "/explore" "Explore"))))))
+                           :status 403)))))
+
 ;;; The handler and the server
 
 (defun anvil-handler (req ent)
   (with-request-user (req)
     (with-page-errors (req ent)
-      (route req ent))))
+      (if (and *read-only?* (read-only-refused? req))
+          (refuse-read-only req ent)
+          (route req ent)))))
 
 (defvar *published-servers* nil)
 
@@ -240,7 +274,10 @@
 
 (defun initialize! (&key (server net.aserve:*wserver*) (hosts *hosts*) (runner? t))
   "Load the store, publish the forge on SERVER for HOSTS, start the
-runner and the housekeeping.  Safe to call again."
+runner and the housekeeping.  Safe to call again.  ANVIL_READ_ONLY in
+the environment makes the forge read-only whatever the start-up file
+said; it never makes one writable."
+  (when (read-only-environment?) (setq *read-only?* t))
   (ensure-directories-exist (data-path "db/"))
   (ensure-directories-exist (data-path "repositories/"))
   (ensure-directories-exist (data-path "ci/traces/"))
@@ -253,8 +290,8 @@ runner and the housekeeping.  Safe to call again."
   (when runner? (start-runner))
   (start-hook-thread)
   (setq *housekeeping-thread* (loop-thread *housekeeping-thread* "anvil housekeeping" 60 #'housekeeping!))
-  (log-line "~a ~a published~@[ for ~{~a~^, ~}~]; data in ~a; docker ~:[not reachable~;reachable~]; runner tags ~{~a~^, ~}"
-            *site-name* *version* hosts (namestring *data-directory*) (docker-available?) *runner-tags*)
+  (log-line "~a ~a published~@[ for ~{~a~^, ~}~]~:[~;, READ-ONLY~]; data in ~a; docker ~:[not reachable~;reachable~]; runner tags ~{~a~^, ~}"
+            *site-name* *version* hosts *read-only?* (namestring *data-directory*) (docker-available?) *runner-tags*)
   :initialized)
 
 (defun start! (&key (port 9090) (hosts *hosts*) (runner? t))

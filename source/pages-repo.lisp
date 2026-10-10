@@ -37,7 +37,8 @@ that names a branch or tag wins; else the first segment is the ref."
                            (project-page project (if (string= path "") "Files" path)
                                          (html (str (ref-picker-html project ref "tree" path))
                                                (when (can? :push project)
-                                                 (htm (:p :class "actions" (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/new/~a~@[/~a~]" (project-url project) (url-encode ref) (and (plusp (length path)) (path-encode path))) "New file"))))
+                                                 (htm (:p :class "actions" (str (mutating-link (format nil "~a/-/new/~a~@[/~a~]" (project-url project) (url-encode ref) (and (plusp (length path)) (path-encode path))) "New file"
+                                                                                            :class "btn btn-small btn-quiet")))))
                                                (str (tree-table-html project ref commit-oid path entries))
                                                (let ((readme (readme-entry entries)))
                                                  (when (and readme (plusp (length path)))
@@ -74,7 +75,7 @@ that names a branch or tag wins; else the first segment is the ref."
                                                 (:a :class "btn btn-small btn-quiet" :href raw-url "Raw")
                                                 (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a/~a" url (url-encode ref) (path-encode path)) "History")
                                                 (when (and (can-push-branch? project ref) (not binary?) (not big?))
-                                                  (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/edit/~a/~a" url (url-encode ref) (path-encode path)) "Edit")))
+                                                  (htm (str (mutating-link (format nil "~a/-/edit/~a/~a" url (url-encode ref) (path-encode path)) "Edit" :class "btn btn-small btn-quiet"))))
                                                 (when (can-push-branch? project ref)
                                                   (htm (:form :method "post" :action (format nil "~a/-/delete/~a/~a" url (url-encode ref) (path-encode path)) :style "display:inline"
                                                          (str (the-object site (button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete ~a on ~a?" name ref)))))))))

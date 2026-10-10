@@ -50,7 +50,7 @@
   (respond-html req ent
                 (the-object (site) (page "Groups"
                                          (html (:h1 "Groups")
-                                               (when *current-user* (htm (:p (:a :class "btn btn-small" :href "/groups/new" "New group"))))
+                                               (when *current-user* (htm (:p (str (mutating-link "/groups/new" "New group" :class "btn btn-small")))))
                                                (str (the-object (site) (table '("Group" "Projects" "Description")
                                                                               (mapcar (lambda (g) (list (html (:a :href (group-url g) (hs (getf g :full-path))))
                                                                                                         (princ-to-string (length (remove-if-not #'can-read-project? (group-projects g))))
@@ -64,7 +64,7 @@
                   (the-object (site) (page "Your projects"
                                            (html (:h1 "Your projects")
                                                  (str (project-cards mine :empty "You are not a member of any project yet."))
-                                                 (:p :class "actions" (:a :class "btn" :href "/projects/new" "New project")
+                                                 (:p :class "actions" (str (mutating-link "/projects/new" "New project" :class "btn"))
                                                      (:a :class "btn btn-quiet" :href "/explore" "Explore"))))))))
 
 ;;; Sign in, sign up, sign out
@@ -82,7 +82,7 @@
                                                      (str (the-object (site) (field "password" "Password" :type "password" :required t :autocomplete "current-password")))
                                                      (str (the-object (site) (button "Sign in"))))
                                                    (when *registration-open?*
-                                                     (htm (:p :class "hint" "No account? " (:a :href "/users/sign_up" "Register") "."))))))))
+                                                     (htm (:p :class "hint" "No account? " (str (mutating-link "/users/sign_up" "Register")) "."))))))))
                                      :status (if error 401 200)))
 
 (defun sign-in-post (req ent)
@@ -338,7 +338,7 @@
                                                            (unless (blank? (getf group :description)) (htm " · " (hs (getf group :description))))))
                                                  (:div :class "actions"
                                                    (when (and level (>= level 40))
-                                                     (htm (:a :class "btn btn-small" :href (format nil "/projects/new?group=~d" (getf group :id)) "New project")
+                                                     (htm (str (mutating-link (format nil "/projects/new?group=~d" (getf group :id)) "New project" :class "btn btn-small"))
                                                           (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/settings" (group-url group)) "Settings")))))
                                                (:h2 "Projects")
                                                (str (project-cards (remove-if-not #'can-read-project? (group-projects group)) :empty "No projects yet."))

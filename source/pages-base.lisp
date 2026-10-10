@@ -26,6 +26,11 @@
   ;; so a bare (hs ...) inside a tag wrote nothing (every badge, name
   ;; and count on the site was empty, 2026-10-08).  `html' walks its
   ;; body first and wraps each (hs ...) in body position in (str ...).
+  (defun post-form? (form)
+    "Whether FORM is (:form ... :method \"post\" ...), written so."
+    (and (eq (first form) :form)
+         (let ((method (getf (nth-value 0 (who-attributes-and-body (rest form))) :method)))
+           (and (stringp method) (string-equal method "post")))))
   (defun who-attributes-and-body (forms)
     "FORMS after a tag's keyword: two values, the attribute plist and the body."
     (loop while (and (consp forms) (keywordp (first forms)) (consp (rest forms)))
@@ -39,7 +44,14 @@
           ((eq (first form) 'htm) `(htm ,@(mapcar #'who-body (rest form))))
           ((keywordp (first form))
            (multiple-value-bind (attributes body) (who-attributes-and-body (rest form))
-             `(,(first form) ,@attributes ,@(mapcar #'who-body body))))
+             (if (post-form? form)
+                 ;; a form that changes something: its controls greyed
+                 ;; on a read-only forge (read-only-fieldset)
+                 `(,(first form) ,@attributes
+                   (when *read-only?* (str (read-only-fieldset-open)))
+                   ,@(mapcar #'who-body body)
+                   (when *read-only?* (str "</fieldset>")))
+                 `(,(first form) ,@attributes ,@(mapcar #'who-body body)))))
           ((and (consp (first form)) (keywordp (first (first form))))
            ;; ((:tag attrs...) body...)
            `((,(first (first form)) ,@(nth-value 0 (who-attributes-and-body (rest (first form)))))
@@ -49,6 +61,8 @@
     "FORM as Lisp code, with any (htm ...) inside it walked as a body."
     (cond ((atom form) form)
           ((eq (first form) 'quote) form)
+          ;; a nested html walks its own body when it expands
+          ((eq (first form) 'html) form)
           ((eq (first form) 'htm) `(htm ,@(mapcar #'who-body (rest form))))
           (t (let ((walked nil) (tail form))
                (loop while (consp tail) do (push (who-code (pop tail)) walked))
@@ -58,6 +72,22 @@
 (defmacro html (&body body)
   "A string of HTML from cl-who forms; see the walk above."
   `(with-lhtml-string () ,@(mapcar #'who-body body)))
+
+;;; Read-only: a form's controls sit in a disabled fieldset (the walk
+;;; above puts it there), and a link to a change becomes a greyed span;
+;;; both say why in their title.  The refusal itself is the gate in
+;;; initialize.lisp.
+
+(defun read-only-fieldset-open ()
+  (format nil "<fieldset class=\"read-only\" disabled=\"disabled\" title=\"~a\">" (hs *read-only-text*)))
+
+(defun mutating-link (href label &key (class "") style)
+  "String of HTML: a link to HREF, a page that changes something; on a
+read-only forge, the same control greyed and inert."
+  (if *read-only?*
+      (html (:span :class (format nil "~a disabled" class) :style style :aria-disabled "true"
+                   :title (hs *read-only-text*) (hs label)))
+      (html (:a :class (and (plusp (length class)) class) :style style :href href (hs label)))))
 
 (defvar *site-script* "" "The pages' one script; set below, after the site object.")
 
@@ -111,7 +141,7 @@ link, the search, and the signed-in user's menu or the sign-in link."
           (:input :type "search" :name "q" :placeholder "Search projects" :aria-label "Search projects"))
         (:div :class "bar-user"
           (cond (*current-user*
-                 (htm (:a :class "btn btn-small" :href "/projects/new" "New project")
+                 (htm (str (mutating-link "/projects/new" "New project" :class "btn btn-small"))
                       (:details :class "menu"
                         (:summary (:span :class "avatar" (hs (user-avatar-letter *current-user*)))
                                   (hs (getf *current-user* :username)))
@@ -121,8 +151,8 @@ link, the search, and the signed-in user's menu or the sign-in link."
                           (:a :href "/-/profile/tokens" "Access tokens")
                           (when (admin?) (htm (:a :href "/admin" "Admin area")))
                           (:form :method "post" :action "/users/sign_out" (:button :type "submit" :class "linklike" "Sign out"))))))
-                (t (htm (:a :class "btn btn-small" :href "/users/sign_in" "Sign in")
-                        (when *registration-open?* (htm (:a :class "quiet" :href "/users/sign_up" "Register"))))))))))
+                (t (htm (str (mutating-link "/users/sign_in" "Sign in" :class "btn btn-small"))
+                        (when *registration-open?* (htm (str (mutating-link "/users/sign_up" "Register" :class "quiet")))))))))))
 
    (crumbs-html (crumbs)
     (html (:nav :class "crumbs" :aria-label "Breadcrumb"
@@ -210,7 +240,7 @@ link, the search, and the signed-in user's menu or the sign-in link."
     (html (:div :class "empty-state"
             (:h3 (hs title))
             (:p (str text))
-            (when action-href (htm (:a :class "btn" :href action-href (hs action-label)))))))
+            (when action-href (htm (str (mutating-link action-href action-label :class "btn")))))))
 
    (oauth-consent-html (app redirect-uri state scope challenge method)
     (the (page "Authorize"
@@ -357,7 +387,7 @@ error a 500 page (and a log line)."
                                                      (:h1 (hs (case status (404 "Not found") (403 "Not allowed") (401 "Sign in") (t (format nil "~d" status)))))
                                                      (:p (hs text))
                                                      (when (and (= status 401) (not *current-user*))
-                                                       (htm (:p (:a :class "btn" :href (format nil "/users/sign_in?return_to=~a" (url-encode (request-path req))) "Sign in"))))))))
+                                                       (htm (:p (str (mutating-link (format nil "/users/sign_in?return_to=~a" (url-encode (request-path req))) "Sign in" :class "btn")))))))))
                     :status status)))
 
 (defun flash-notice (req)

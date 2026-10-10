@@ -58,9 +58,32 @@ set before `initialize!` or `start!`:
 | `*runner-tags*`, `*runner-parallelism*` | What jobs this image's runner takes, and how many at once. |
 | `*deploy-houses*` | The houses a project may be deployed to: `(:key :common-lisp.app :name "..." :lab-url "https://lab.common-lisp.app/prompt-lab" :secret-file #p"..." :domain "common-lisp.app")`. |
 
+| `*read-only?*` | A forge that only shows; see below.  Set from `ANVIL_READ_ONLY`. |
+
 `initialize!` publishes the forge on an existing AllegroServe server
 (for a Gendl image that serves other things too, scoped by `*hosts*`);
 `start!` starts a server of Anvil's own on a port.
+
+### Read-only
+
+With the environment variable `ANVIL_READ_ONLY` set to anything
+non-empty (`ANVIL_READ_ONLY=1`), the forge only shows.  Browsing works
+as before, clones and fetches included.  Every change over HTTP is
+refused with a 403, whichever page or program asks: signing up or in,
+tokens and keys, new projects, groups, issues and merge requests,
+comments, edits, settings, the API's writing verbs, OAuth2 (no token is
+issued) and pushes (git prints the refusal).  Refusals come back as a
+page, as JSON for the API and OAuth, and as plain text for git.  The
+pages keep every control that would change something but grey it out,
+with a title saying the forge is read-only for now.
+
+`dev.lisp`, `ci/runner-smoke.lisp` and the lab rig's
+`ci/lab-e2e/anvil-init.lisp` read the variable into `*read-only?*`,
+and `initialize!` sets it as well whenever the variable is there, so
+a start-up file of your own can't leave such a forge writable.
+Functions called at the REPL still write.  That is how a read-only forge
+gets loaded and kept current: `make-user!`, `import-from-gitlab!` (run
+it again to refresh), `fetch-repository!`.
 
 ## Continuous integration
 

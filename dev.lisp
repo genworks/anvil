@@ -34,6 +34,9 @@
 
 (setq anvil:*site-url* (or (uiop:getenv "ANVIL_SITE_URL") "http://localhost:9095"))
 
+;; ANVIL_READ_ONLY, non-empty, for a forge that only shows (README.md)
+(setq anvil:*read-only?* (anvil:read-only-environment?))
+
 ;; a Docker socket, when the image has one, gives the runner its executor
 (setq anvil:*docker-socket* (and (probe-file "/var/run/docker.sock") "/var/run/docker.sock"))
 
