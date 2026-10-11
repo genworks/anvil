@@ -62,10 +62,12 @@
                             "forks_count" 0
                             "star_count" (or (getf project :star-count) 0)
                             "last_activity_at" (iso-timestamp-ms (or (getf project :last-activity) (getf project :created)))
-                            "namespace" (namespace-json project))))
+                            "namespace" (namespace-json project)
+                            ;; in the simple form too, as GitLab 19 answers
+                            ;; (an importer keeping private things out reads it)
+                            "visibility" (string-downcase (symbol-name (getf project :visibility))))))
     (unless simple?
-      (setf (gethash "visibility" table) (string-downcase (symbol-name (getf project :visibility)))
-            (gethash "empty_repo" table) (json-boolean empty?)
+      (setf (gethash "empty_repo" table) (json-boolean empty?)
             (gethash "archived" table) (json-boolean (getf project :archived?))
             (gethash "issues_enabled" table) (json-boolean (getf project :issues-enabled? t))
             (gethash "merge_requests_enabled" table) (json-boolean (getf project :merge-requests-enabled? t))

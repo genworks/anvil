@@ -149,7 +149,16 @@ and when; a user of the same username here is matched instead.
 Importing again brings a repository up to date and adds only the
 issues and merge requests not here yet.  `:into "a-group"` puts single
 projects under one group here; `:auth '("oauth2" . "<token>")` fetches
-repositories that are not public.  The fetch calls itself
+repositories that are not public.
+
+On a read-only forge, which serves the public, the importer brings only
+what the public sees on the GitLab, whatever the token can see: a
+project that is private or internal there is left out (its report says
+`:skipped`), and so are a public project's issues or merge requests when
+they are open to members only.  `:public-only? nil` brings everything.
+A project's issues or merge requests that fail to come are reported
+(`:issues-error`, `:merge-requests-error`) and the import goes on with
+the rest.  The fetch calls itself
 `git/anvil-import`, because common-lisp.net's bot challenge passes git
 clients by their user agent and challenges anything else.
 

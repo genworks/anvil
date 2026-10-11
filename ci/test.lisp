@@ -552,6 +552,30 @@ deploy:
          (and (equal "readonly-import/pushed" (getf (first reports) :project))
               (eql 200 (nth-value 1 (ask "/readonly-import/pushed"))))))
 
+;; a read-only forge serves the public, so its importer brings only what
+;; the public sees there, whatever the token can see; one part failing
+;; leaves the rest of the import going
+(let ((reports (ignore-errors (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/secret") :into "readonly-import"))))
+  (check "read-only: the importer leaves a private project out"
+         (and (getf (first reports) :skipped)
+              (null (uiop:symbol-call :anvil :find-project "readonly-import/secret")))))
+(let ((reports (ignore-errors (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/secret") :into "readonly-private"
+                                                                          :public-only? nil))))
+  (check "read-only: :public-only? nil brings it, private"
+         (let ((project (uiop:symbol-call :anvil :find-project "readonly-private/secret")))
+           (and (null (getf (first reports) :skipped)) project (eq :private (getf project :visibility))))))
+(multiple-value-bind (project report)
+    (handler-case
+        (uiop:symbol-call :anvil :import-gitlab-project!
+                          (uiop:symbol-call :anvil :make-gitlab-client *base* :token *token*)
+                          (uiop:symbol-call :anvil :json-table "id" 99999 "path" "ghost" "name" "ghost" "visibility" "public"
+                                            "issues_access_level" "enabled" "merge_requests_access_level" "enabled"
+                                            "namespace" (uiop:symbol-call :anvil :json-table "full_path" "readonly-import"))
+                          :repository? nil)
+      (error (e) (problem "an import part failing: ~a" e) (values nil nil)))
+  (check "read-only: a part that fails is reported and the import goes on"
+         (and project (getf report :issues-error) (getf report :merge-requests-error))))
+
 (read-only! nil)
 (check "off again: the API writes" (integerp (jget (json (ask "/api/v4/projects/1/issues" :method :post :token *token* :content-type "application/json"
                                                                                   :content "{\"title\":\"After read-only\"}"))

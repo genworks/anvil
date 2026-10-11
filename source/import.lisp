@@ -175,6 +175,14 @@ subgroups', by path."
           ((equal v "internal") :internal)
           (t :public))))
 
+(defun gitlab-feature-public? (json feature)
+  "Whether FEATURE (\"issues\", \"merge_requests\", \"repository\") of the
+GitLab project JSON is open to everyone who can see the project: its
+access level `enabled', or not given.  `private' is members only;
+`disabled' is off."
+  (let ((level (json-get json (format nil "~a_access_level" feature))))
+    (or (null level) (equal level "enabled"))))
+
 (defun gitlab-time (text)
   (or (parse-iso-timestamp text) (get-universal-time)))
 
@@ -316,19 +324,40 @@ of that name here when there is one, else on a group of that path."
 
 ;;; Projects and groups
 
-(defun import-gitlab-project! (client json &key namespace kind importer (issues? t) (merge-requests? t) (repository? t) auth)
+(defun import-gitlab-project! (client json &key namespace kind importer (issues? t) (merge-requests? t) (repository? t) auth
+                                                (public-only? *read-only?*))
   "JSON, a GitLab project as the API describes it, made here as the
 same path in NAMESPACE (KIND :group or :user; by default the namespace
 of the same path here, made as a group when missing), its repository
 fetched (every branch and tag, HEAD too), its issues and merge
 requests brought over with their notes.  A project that exists already
 is brought up to date instead.  AUTH is (user . token) for a
-repository that is not public.  Values: the project record and a
-report plist."
+repository that is not public.  PUBLIC-ONLY? (on by default on a
+read-only forge, which serves the public) leaves out a project that is
+not public there, and the parts of a public one open to members only.
+A part that fails (the repository, the issues, the merge requests) is
+reported and the rest goes on.  Values: the project record (nil when
+left out) and a report plist."
   (let* ((path (json-get json "path"))
          (gitlab-id (json-get json "id"))
          (full (format nil "~a/~a" (if namespace (namespace-path namespace kind) (json-get (json-get json "namespace") "full_path")) path))
          (report (list :project full :gitlab-id gitlab-id)))
+    (when (and public-only? (not (eq (gitlab-visibility json) :public)))
+      (log-line "import ~a: left out, ~(~a~) there" full (gitlab-visibility json))
+      (return-from import-gitlab-project! (values nil (append report (list :skipped (format nil "~(~a~) there" (gitlab-visibility json)))))))
+    (when public-only?
+      ;; a listing (simple=true) carries no access levels: ask for the
+      ;; project itself, and on no answer leave its issues and merge
+      ;; requests out rather than guess
+      (let ((full-json (if (json-get json "issues_access_level")
+                           json
+                           (handler-case (gitlab-get client (format nil "/projects/~d" gitlab-id))
+                             (error (e)
+                               (log-line "import ~a: no access levels (~a): its issues and merge requests left out" full e)
+                               nil)))))
+        (setq repository? (and repository? (gitlab-feature-public? (or full-json json) "repository"))
+              issues? (and issues? full-json (gitlab-feature-public? full-json "issues"))
+              merge-requests? (and merge-requests? full-json (gitlab-feature-public? full-json "merge_requests")))))
     (unless namespace
       (multiple-value-setq (namespace kind) (ensure-import-namespace! (json-get json "namespace") importer)))
     (let ((project (or (find-project full)
@@ -351,19 +380,27 @@ report plist."
             (log-line "import ~a: the repository: ~a" full e)
             (setf (getf report :repository-error) (princ-to-string e)))))
       (when (and issues? (getf project :issues-enabled? t))
-        (setf (getf report :issues) (import-gitlab-issues! client project gitlab-id importer)))
+        (handler-case (setf (getf report :issues) (import-gitlab-issues! client project gitlab-id importer))
+          (error (e)
+            (log-line "import ~a: the issues: ~a" full e)
+            (setf (getf report :issues-error) (princ-to-string e)))))
       (when (and merge-requests? (getf project :merge-requests-enabled? t))
-        (setf (getf report :merge-requests) (import-gitlab-merge-requests! client project gitlab-id importer)))
+        (handler-case (setf (getf report :merge-requests) (import-gitlab-merge-requests! client project gitlab-id importer))
+          (error (e)
+            (log-line "import ~a: the merge requests: ~a" full e)
+            (setf (getf report :merge-requests-error) (princ-to-string e)))))
       (let ((project (find-project (getf project :id))))
         (update-record! project :last-activity (gitlab-time (json-get json "last_activity_at")))
         (log-line "imported ~a: ~s" full report)
         (values (find-project (getf project :id)) report)))))
 
-(defun import-gitlab-group! (client group-path &key (projects :all) importer (issues? t) (merge-requests? t) (repository? t) auth)
+(defun import-gitlab-group! (client group-path &key (projects :all) importer (issues? t) (merge-requests? t) (repository? t) auth
+                                                    (public-only? *read-only?*))
   "The group GROUP-PATH of the GitLab behind CLIENT made here as it is
 there, and its projects imported: all of them, or those whose path
-(or path with namespace) is in PROJECTS.  Values: the group record and
-a report per project."
+(or path with namespace) is in PROJECTS; with PUBLIC-ONLY?, the public
+ones (import-gitlab-project!).  Values: the group record and a report
+per project."
   (let* ((json (or (gitlab-find-group client group-path) (error "No group ~a at ~a." group-path (getf client :url))))
          (group (ensure-import-group! json importer))
          (reports nil))
@@ -373,12 +410,14 @@ a report per project."
                 (member (json-get p "path_with_namespace") projects :test #'string-equal))
         (multiple-value-bind (project report)
             (import-gitlab-project! client p :namespace group :kind :group :importer importer
-                                             :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth)
+                                             :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth
+                                             :public-only? public-only?)
           (declare (ignore project))
           (push report reports))))
     (values group (nreverse reports))))
 
-(defun import-from-gitlab! (url &key token groups projects into importer (issues? t) (merge-requests? t) (repository? t) auth)
+(defun import-from-gitlab! (url &key token groups projects into importer (issues? t) (merge-requests? t) (repository? t) auth
+                                     (public-only? *read-only?*))
   "Import from the GitLab at URL (\"https://gitlab.common-lisp.net\"),
 asked with TOKEN (a personal access token with read_api; public
 things need none).  GROUPS: group paths, each imported with every
@@ -387,7 +426,10 @@ PROJECTS: \"namespace/path\" strings, each landing in the namespace of
 that path here (made as a group when missing), or all of them in the
 group INTO.  IMPORTER: the user here who authors what has no author
 here, the first administrator by default.  AUTH: (user . token) for
-repositories that are not public.  Answers a report per project."
+repositories that are not public.  PUBLIC-ONLY?, on by default on a
+read-only forge: only what the public sees there is brought here
+(import-gitlab-project!), whatever TOKEN can see.  Answers a report per
+project."
   (let* ((client (make-gitlab-client url :token token))
          (importer (or importer
                        (find-record :user (lambda (u) (getf u :admin?)))
@@ -398,14 +440,16 @@ repositories that are not public.  Answers a report per project."
       (multiple-value-bind (group group-reports)
           (import-gitlab-group! client (if (consp g) (first g) g)
                                 :projects (if (consp g) (rest g) :all)
-                                :importer importer :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth)
+                                :importer importer :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth
+                                :public-only? public-only?)
         (declare (ignore group))
         (setq reports (append reports group-reports))))
     (dolist (p projects)
       (let ((json (or (gitlab-find-project client p) (error "No project ~a at ~a." p url))))
         (multiple-value-bind (project report)
             (import-gitlab-project! client json :namespace into-group :kind (and into-group :group) :importer importer
-                                                :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth)
+                                                :issues? issues? :merge-requests? merge-requests? :repository? repository? :auth auth
+                                                :public-only? public-only?)
           (declare (ignore project))
           (setq reports (append reports (list report))))))
     reports))
