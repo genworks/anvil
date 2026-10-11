@@ -59,6 +59,7 @@ set before `initialize!` or `start!`:
 | `*deploy-houses*` | The houses a project may be deployed to: `(:key :common-lisp.app :name "..." :lab-url "https://lab.common-lisp.app/prompt-lab" :secret-file #p"..." :domain "common-lisp.app")`. |
 
 | `*read-only?*` | A forge that only shows; see below.  Set from `ANVIL_READ_ONLY`. |
+| `*robots-txt*` | What `/robots.txt` answers: by default project pages, issues and merge requests yes, the per-commit history, archives and the API no. |
 
 `initialize!` publishes the forge on an existing AllegroServe server
 (for a Gendl image that serves other things too, scoped by `*hosts*`);

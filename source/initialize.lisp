@@ -26,6 +26,8 @@
            (seg (n) (nth n segments)))
       (cond
         ((null segments) (home-page req ent))
+        ((and (equal path "/robots.txt") (get?))
+         (respond req ent *robots-txt* :content-type "text/plain; charset=utf-8" :cache-control "public, max-age=86400"))
         ;; static files
         ((string= (seg 0) "static")
          (let ((name (format nil "~{~a~^/~}" (rest segments))))

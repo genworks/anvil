@@ -57,6 +57,37 @@ set and non-empty."
   (let ((flag (uiop:getenv "ANVIL_READ_ONLY")))
     (and flag (plusp (length flag)) t)))
 
+(defvar *robots-txt*
+  "# Project pages, issues, merge requests, groups: yes.  The history
+# file by file at every commit, archives and the API: no -- a forge's
+# address space is every commit times every path.
+User-agent: *
+Crawl-delay: 2
+Disallow: /api/
+Disallow: /search
+Disallow: /users/
+Disallow: /oauth/
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /-/
+Disallow: /*.git/
+Disallow: /*/-/commit/
+Disallow: /*/-/commits/
+Disallow: /*/-/compare
+Disallow: /*/-/tree/
+Disallow: /*/-/blob/
+Disallow: /*/-/raw/
+Disallow: /*/-/archive/
+Disallow: /*/-/switch
+Disallow: /*/-/edit/
+Disallow: /*/-/new/
+Disallow: /*/-/jobs/
+Disallow: /*/-/pipelines
+Disallow: /*/-/deployments
+Disallow: /*/-/settings
+"
+  "String. What /robots.txt answers.")
+
 (defvar *default-visibility* :public)
 
 (defvar *default-branch-name* "master"
