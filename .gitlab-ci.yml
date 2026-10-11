@@ -11,12 +11,22 @@ variables:
   # master into ingot/ here, with curl: the image carries no git.
   # Once Ingot is stable, Ingot itself can fetch it.
   INGOT_ARCHIVE: "https://gitlab.common-lisp.net/clo/ingot/-/archive/master/ingot-master.tar.gz"
+  # The runner's tag: this file runs on two GitLabs (the project is
+  # mirrored), whose container runners carry different tags.
+  RUNNER_TAG: "common-lisp.net"
+
+workflow:
+  rules:
+    - if: $CI_SERVER_HOST == "gitlab.genworks.com"
+      variables:
+        RUNNER_TAG: "amd64-docker"
+    - when: always
 
 cold-load-and-smoke:
   stage: test
   image: genworks/gendl:devo-ccl
   tags:
-    - common-lisp.net
+    - $RUNNER_TAG
   script:
     - rm -rf "$CI_PROJECT_DIR/ingot" && curl -fsSL "$INGOT_ARCHIVE" | tar xz -C "$CI_PROJECT_DIR" && mv "$CI_PROJECT_DIR/ingot-master" "$CI_PROJECT_DIR/ingot"
     - cd /opt/gendl
