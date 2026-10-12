@@ -22,8 +22,8 @@ which Anvil takes as a dependency:
 
 | System | What | Depends on |
 | --- | --- | --- |
-| `ingot` | Git in Common Lisp: objects, packs, refs, trees, commits, diffs, merges, the smart HTTP protocol on both sides, archives.  No web server, no Gendl.  Usable on its own. | ironclad, chipz, salza2, babel, bordeaux-threads |
-| `anvil` | The forge: the model and its storage, accounts and permissions, the web pages (Gendl), the REST API, OAuth2, CI (the YAML reader, the native pipeline, the runner), webhooks, deployment. | ingot, gendl (gwl), cl-who, cl-ppcre, yason, drakma, 3bmd |
+| `ingot` | Git in Common Lisp: objects, packs, refs, trees, commits, diffs, merges, the smart HTTP protocol on both sides, archives.  SHA-1, SHA-256 and CRC-32 written in.  No web server, no Gendl.  Usable on its own. | chipz, salza2, babel, bordeaux-threads |
+| `anvil` | The forge: the model and its storage, accounts and permissions, the web pages, the REST API, OAuth2, CI (the YAML reader, the native pipeline, the runner), webhooks, deployment. | ingot, gendl (gwl), cl-who, cl-ppcre, yason, cl-base64, flexi-streams, 3bmd |
 
 Ingot is plain Common Lisp with a hand-written `ingot.asd`, so it loads
 into any Lisp with ASDF alone.  Anvil is a cl-lite codebase: its `.asd`
@@ -42,8 +42,8 @@ machinery that the Lisp cannot see fail).  So Ingot reads and
 writes the repository itself:
 
 - **Objects.** Loose objects (zlib) and packfiles with their `.idx`
-  (version 2), including `ofs-delta` and `ref-delta` entries; SHA-1
-  through ironclad.  Objects are found loose first, then in every pack
+  (version 2), including `ofs-delta` and `ref-delta` entries.  Objects
+  are found loose first, then in every pack
   of the repository, with the pack directory re-read when it changes.
 - **Refs.** Loose refs, `packed-refs`, `HEAD` as a symbolic ref.  An
   update writes the loose ref through a temporary file and a rename,
@@ -141,28 +141,31 @@ public project reads for anyone, an internal one for anyone signed in.
 Developers push to unprotected branches; the default branch is
 protected (Maintainers push and merge).  Admins see everything.
 
-## The web face (Gendl)
+## The web face
 
-The pages are Gendl objects.  One shared root object, `anvil-site`,
-holds the chrome (the bar, the footer, the class lists) and the
-settings every page reads; it is published at the site's hosts as a
-`base-html-page` tree the way cl-site's root is.  The forge's own
-addresses are dynamic (`/<namespace>/<project>/-/tree/<ref>/<path>`),
-so they are served by prefix handlers that find or make the object
-that renders them and ask it for HTML:
+The forge's address space is dynamic -- every commit times every path
+under `/<namespace>/<project>/-/tree/<ref>/<path>` -- so it is served
+by one prefix handler and a router (`initialize.lisp`), and the pages
+are functions of a request that build HTML with cl-who through the
+helpers in `pages-base.lisp` (`form-field`, `html-table`,
+`status-badge-html` and the rest), not a published page tree.  Gendl
+objects are used where something has state and dependencies:
 
-- A **project object** (`project-view`) per project, kept in a table
-  for the life of the image: its computed slots are the facts that
-  cost something and change only on a push -- the branches with their
-  tips, the tags, the README rendered, the languages, the default
-  branch's tree -- and a push sets `:head-stamp` on it, which empties
-  what depends on it (Gendl's dependency tracking, nothing more).
-- A **ref view** (`tree-view`, `blob-view`, `commits-view`,
-  `commit-view`) is made per request as a child of the project object
-  and thrown away: cheap, and what it computes it computes once per
-  request even when three parts of the page ask.
-- Issues, merge requests, pipelines, settings and the account pages are
-  functions of the site object taking the records they show.
+- **`anvil-site`**, one shared object: the frame every page is drawn
+  in (head, bar, footer), with the stylesheet's version stamped once.
+  Pages reach it through `page-html`.
+- **`project-view`**, one per project for the life of the image: its
+  computed slots are the facts that cost something and change only on
+  a push -- the branches with their tips, the tags, the README
+  rendered, the counts, the default branch's tree, the CI file, the
+  hosting profile.  A push sets `head-stamp`, and Gendl's dependency
+  tracking recomputes what read it.  The view is shared between
+  request threads and refreshed from the hooks thread; dependency
+  tracking is not locked, so a page drawn while a push lands may read
+  a slot midway, and the next request reads it whole.
+- **`ci-pipeline`** and **`ci-job`** (CI below): the pipeline's status,
+  the jobs that may start and each stage's state, computed from the
+  jobs' settable statuses.
 
 The pages are plain HTML with one stylesheet of Anvil's own
 (`static/anvil.css`: custom properties, a light and a dark theme, no
@@ -306,8 +309,8 @@ mounted into the forge's container; `DOCKER_HOST=tcp://...` works
 too).  No `docker` command, no `git` in the job's image:
 
 1. `POST /containers/create` with the job's image, the command
-   `sh -c <script>`, the variables, a working directory, no network
-   unless the job asks (`services` get a network of their own), a
+   `sh -c <script>`, the variables, a working directory, the default
+   bridge network (a job with `services` gets a network of its own), a
    memory limit, and the labels that name the job.
 2. The working tree is a tar made from the commit's tree by
    Ingot, uploaded with `PUT /containers/:id/archive` into

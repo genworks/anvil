@@ -57,7 +57,7 @@ set before `initialize!` or `start!`:
 | `*docker-socket*` | The Docker daemon's Unix socket (mount it into the container), or `tcp://host:port`; nil switches the executor off. |
 | `*runner-tags*`, `*runner-parallelism*` | What jobs this image's runner takes, and how many at once. |
 | `*deploy-houses*` | The houses a project may be deployed to: `(:key :common-lisp.app :name "..." :lab-url "https://lab.common-lisp.app/prompt-lab" :secret-file #p"..." :domain "common-lisp.app")`. |
-
+| `*push-mirrors?*` | Whether a project's push mirrors are pushed to; nil for a forge that must write to no other (a test instance beside the GitLab it imports from). |
 | `*read-only?*` | A forge that only shows; see below.  Set from `ANVIL_READ_ONLY`. |
 | `*robots-txt*` | What `/robots.txt` answers: by default project pages, issues and merge requests yes, the per-commit history, archives and the API no. |
 

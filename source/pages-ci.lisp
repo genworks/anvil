@@ -15,7 +15,7 @@
 ;;
 
 (defun pipelines-page (req ent project)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (pipelines (project-pipelines project))
          (view (project-view project)))
     (respond-html req ent
@@ -27,19 +27,19 @@
                                                  (:select :name "ref"
                                                    (dolist (entry (the-object view branches)) (htm (:option :value (first entry) (hs (first entry)))))
                                                    (dolist (entry (the-object view tags)) (htm (:option :value (first entry) (hs (first entry))))))
-                                                 (str (the-object site (button "Run pipeline" :class "btn btn-small")))))))
+                                                 (str (form-button "Run pipeline" :class "btn btn-small"))))))
                                       (unless (the-object view ci-file)
                                         (htm (:p :class "hint" "No " (:code "ci.sexp") " or " (:code ".gitlab-ci.yml") " on the default branch; see " (:a :href "/help" "Help") ".")))
-                                      (str (the-object site (table '("Status" "Pipeline" "Commit" "Stages" "Duration" "")
-                                                                   (mapcar (lambda (p) (pipeline-row site project p)) pipelines)
-                                                                   :empty "No pipelines yet.")))
+                                      (str (html-table '("Status" "Pipeline" "Commit" "Stages" "Duration" "")
+                                                                   (mapcar (lambda (p) (pipeline-row project p)) pipelines)
+                                                                   :empty "No pipelines yet."))
                                       (when (some (lambda (p) (member (getf p :status) '(:created :pending :running))) pipelines)
                                         (htm (:span :data-poll "1"))))
                                 :active :pipelines :notice (flash-notice req)))))
 
-(defun pipeline-row (site project pipeline)
+(defun pipeline-row (project pipeline)
   (let ((url (project-url project)))
-    (list (the-object site (status-badge (getf pipeline :status) :href (pipeline-url project pipeline)))
+    (list (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))
           (html (:a :href (pipeline-url project pipeline) "#" (hs (princ-to-string (getf pipeline :id))))
                 " " (:span :class "quiet" (hs (status-text (getf pipeline :source)))) " "
                 (:span :class "badge" (hs (getf pipeline :ref)))
@@ -47,9 +47,9 @@
           (html (:a :href (format nil "~a/-/commit/~a" url (getf pipeline :sha)) (:code (hs (subseq (getf pipeline :sha) 0 8))))
                 " " (:span :class "quiet" (hs (or (getf pipeline :title) ""))))
           (html (dolist (job (pipeline-jobs pipeline))
-                  (htm (:a :href (job-url project job) :title (getf job :name) (str (the-object site (status-badge (getf job :status))))) " ")))
+                  (htm (:a :href (job-url project job) :title (getf job :name) (str (status-badge-html (getf job :status)))) " ")))
           (hs (duration-text (pipeline-duration pipeline)))
-          (the-object site (time-html (getf pipeline :created))))))
+          (time-html (getf pipeline :created)))))
 
 (defun pipeline-run-post (req ent project)
   (require-can :run-pipeline project)
@@ -60,22 +60,22 @@
     (ci-spec-error (e) (redirect req ent (with-notice (format nil "~a/-/pipelines" (project-url project)) (ci-spec-error-text e))))))
 
 (defun pipeline-page (req ent project pipeline)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (jobs (pipeline-jobs pipeline))
          (live? (member (getf pipeline :status) '(:created :pending :running))))
     (respond-html req ent
                   (project-page project (format nil "Pipeline #~d" (getf pipeline :id))
                                 (html (:div :class "thing-head"
-                                        (str (the-object site (status-badge (getf pipeline :status))))
+                                        (str (status-badge-html (getf pipeline :status)))
                                         (:h2 "Pipeline #" (hs (princ-to-string (getf pipeline :id))))
                                         (:span :class "quiet" "for " (:a :href (format nil "~a/-/commit/~a" url (getf pipeline :sha)) (:code (hs (subseq (getf pipeline :sha) 0 8))))
                                                " on " (:span :class "badge" (hs (getf pipeline :ref)))
-                                               " · " (hs (status-text (getf pipeline :source))) " · " (str (the-object site (time-html (getf pipeline :created))))
+                                               " · " (hs (status-text (getf pipeline :source))) " · " (str (time-html (getf pipeline :created)))
                                                (when (getf pipeline :spec-file) (htm " · " (:a :href (format nil "~a/-/blob/~a/~a" url (getf pipeline :sha) (getf pipeline :spec-file)) (hs (getf pipeline :spec-file))))))
                                         (when (can? :run-pipeline project)
                                           (htm (:span :style "margin-left:auto"
-                                                 (when live? (htm (:form :method "post" :action (format nil "~a/cancel" (pipeline-url project pipeline)) :style "display:inline" (str (the-object site (button "Cancel" :class "btn btn-small btn-quiet"))))))
-                                                 (when (member (getf pipeline :status) '(:failed :canceled)) (htm (:form :method "post" :action (format nil "~a/retry" (pipeline-url project pipeline)) :style "display:inline" (str (the-object site (button "Retry failed" :class "btn btn-small btn-quiet"))))))))))
+                                                 (when live? (htm (:form :method "post" :action (format nil "~a/cancel" (pipeline-url project pipeline)) :style "display:inline" (str (form-button "Cancel" :class "btn btn-small btn-quiet")))))
+                                                 (when (member (getf pipeline :status) '(:failed :canceled)) (htm (:form :method "post" :action (format nil "~a/retry" (pipeline-url project pipeline)) :style "display:inline" (str (form-button "Retry failed" :class "btn btn-small btn-quiet")))))))))
                                       (when (getf pipeline :error) (htm (:p :class "profile-bad" (hs (getf pipeline :error)))))
                                       (when (getf pipeline :title) (htm (:p :class "quiet" (hs (getf pipeline :title)))))
                                       (:div :class "stages"
@@ -87,9 +87,9 @@
                                                      (dolist (job stage-jobs)
                                                        (htm (:div :class "job-row"
                                                               (:a :href (job-url project job) (hs (getf job :name)))
-                                                              (:span (str (the-object site (status-badge (getf job :status))))
+                                                              (:span (str (status-badge-html (getf job :status)))
                                                                      (when (and (eq (getf job :status) :manual) (can? :run-pipeline project))
-                                                                       (htm (:form :method "post" :action (format nil "~a/play" (job-url project job)) :style "display:inline" (str (the-object site (button "▶" :class "btn btn-small"))))))))))))))))
+                                                                       (htm (:form :method "post" :action (format nil "~a/play" (job-url project job)) :style "display:inline" (str (form-button "▶" :class "btn btn-small")))))))))))))))
                                       (when live? (htm (:span :data-poll "1")))
                                       (let ((variables (remove-if (lambda (v) (find (car v) (project-variables project) :key (lambda (pv) (getf pv :key)) :test #'string=))
                                                                   (getf pipeline :variables))))
@@ -102,18 +102,18 @@
   (ecase action
     (:cancel (cancel-pipeline! pipeline))
     (:retry (dolist (job (pipeline-jobs pipeline))
-              (when (member (getf job :status) '(:failed :canceled)) (retry-job! job *current-user*)))))
+              (when (member (getf job :status) '(:failed :canceled)) (retry-job! job)))))
   (redirect req ent (pipeline-url project pipeline)))
 
 (defun job-page (req ent project job)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (pipeline (job-pipeline job))
          (live? (member (getf job :status) '(:pending :running))))
     (multiple-value-bind (text size) (read-trace job :start (max 0 (- (nth-value 1 (read-trace job :start 0 :limit 0)) *trace-tail-bytes*)))
       (respond-html req ent
                     (project-page project (format nil "~a (#~d)" (getf job :name) (getf job :id))
                                   (html (:div :class "thing-head"
-                                          (str (the-object site (status-badge (getf job :status))))
+                                          (str (status-badge-html (getf job :status)))
                                           (:h2 (hs (getf job :name)) " " (:span :class "quiet" "#" (hs (princ-to-string (getf job :id)))))
                                           (:span :class "quiet" "in " (:a :href (pipeline-url project pipeline) "pipeline #" (hs (princ-to-string (getf pipeline :id))))
                                                  " · stage " (hs (getf job :stage))
@@ -125,10 +125,10 @@
                                               (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/artifacts" (job-url project job)) "Download artifacts")))
                                             (when (can? :run-pipeline project)
                                               (cond ((eq (getf job :status) :manual)
-                                                     (htm (:form :method "post" :action (format nil "~a/play" (job-url project job)) :style "display:inline" (str (the-object site (button "Play" :class "btn btn-small"))))))
+                                                     (htm (:form :method "post" :action (format nil "~a/play" (job-url project job)) :style "display:inline" (str (form-button "Play" :class "btn btn-small")))))
                                                     ((member (getf job :status) '(:failed :canceled :success))
-                                                     (htm (:form :method "post" :action (format nil "~a/retry" (job-url project job)) :style "display:inline" (str (the-object site (button "Retry" :class "btn btn-small btn-quiet"))))))
-                                                    (live? (htm (:form :method "post" :action (format nil "~a/cancel" (job-url project job)) :style "display:inline" (str (the-object site (button "Cancel" :class "btn btn-small btn-quiet"))))))))))
+                                                     (htm (:form :method "post" :action (format nil "~a/retry" (job-url project job)) :style "display:inline" (str (form-button "Retry" :class "btn btn-small btn-quiet")))))
+                                                    (live? (htm (:form :method "post" :action (format nil "~a/cancel" (job-url project job)) :style "display:inline" (str (form-button "Cancel" :class "btn btn-small btn-quiet")))))))))
                                         (:pre :class "trace" :data-trace (format nil "~a/trace.json" (job-url project job)) :data-live (if live? "1" "0") :data-size size
                                           (hs (if (string= text "") (if live? "Waiting for the runner ..." "No trace.") text)))
                                         (let ((spec (getf job :spec)))
@@ -148,8 +148,8 @@
 (defun job-action-post (req ent project job action)
   (require-can :run-pipeline project)
   (let ((target (ecase action
-                  (:retry (retry-job! job *current-user*))
-                  (:play (or (play-job! job *current-user*) job))
+                  (:retry (retry-job! job))
+                  (:play (or (play-job! job) job))
                   (:cancel (set-job-status! job :canceled)))))
     (redirect req ent (job-url project target))))
 
@@ -162,7 +162,7 @@
 ;;; Deployments
 
 (defun deployments-page (req ent project)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (view (project-view project))
          (deployments (project-deployments project))
          (report (the-object view profile))
@@ -176,33 +176,33 @@
                                 (html (:div :class "grid"
                                         (:div
                                           (:h2 "Deployments")
-                                          (str (the-object site (table '("State" "Commit" "House" "Asked" "Address" "")
+                                          (str (html-table '("State" "Commit" "House" "Asked" "Address" "")
                                                                        (mapcar (lambda (d)
                                                                                  (list (html (:span :class (format nil "badge status-~a" (getf d :state)) (hs (deployment-state-text (getf d :state)))))
                                                                                        (html (:a :href (format nil "~a/-/commit/~a" url (getf d :sha)) (:code (hs (subseq (getf d :sha) 0 8)))))
                                                                                        (hs (let ((h (deploy-house (getf d :house)))) (or (and h (getf h :name)) (princ-to-string (getf d :house)))))
-                                                                                       (the-object site (time-html (getf d :created)))
+                                                                                       (time-html (getf d :created))
                                                                                        (if (getf d :url) (html (:a :href (getf d :url) :rel "noopener" (hs (getf d :url)))) "")
                                                                                        (html (:details (:summary "history")
                                                                                                (:ul (dolist (h (getf d :history)) (htm (:li (hs (getf h :state)) (when (getf h :note) (htm ": " (hs (getf h :note))))))))
                                                                                                (dolist (r (getf d :reasons)) (htm (:p :class "profile-bad" (hs r))))))))
                                                                                deployments)
-                                                                       :empty "Nothing has been deployed yet.")))
+                                                                       :empty "Nothing has been deployed yet."))
                                           (when (some (lambda (d) (not (deployment-final? d))) deployments) (htm (:span :data-poll "1"))))
                                         (:aside
-                                          (str (profile-card site project report))
+                                          (str (profile-card project report))
                                           (when (can? :deploy project)
                                             (htm (:form :method "post" :action (format nil "~a/-/deployments" url) :class "card"
                                                    (:h2 :class "card-title" "Deploy")
-                                                   (str (the-object site (field "house" "House" :options (mapcar (lambda (h) (cons (string-downcase (symbol-name (getf h :key))) (getf h :name))) *deploy-houses*)
-                                                                                :value (and (getf settings :house) (string-downcase (symbol-name (getf settings :house)))))))
+                                                   (str (form-field "house" "House" :options (mapcar (lambda (h) (cons (string-downcase (symbol-name (getf h :key))) (getf h :name))) *deploy-houses*)
+                                                                                :value (and (getf settings :house) (string-downcase (symbol-name (getf settings :house))))))
                                                    (:p :class "hint" "The default branch at its tip, " (:code (hs (if (the-object view head-oid) (subseq (the-object view head-oid) 0 8) "none")))
                                                        ", is handed to the house, which builds it, checks it against the profile, reads it, and puts it up. The project must be public.")
-                                                   (str (the-object site (button "Deploy now" :confirm "Hand the default branch to the house?")))
+                                                   (str (form-button "Deploy now" :confirm "Hand the default branch to the house?"))
                                                    (:hr)
                                                    (:label (:input :type "checkbox" :name "on_green" :value "1" :checked (and (getf settings :on-green?) "checked"))
                                                            " deploy on every green pipeline of the default branch")
-                                                   (:p (str (the-object site (button "Save settings" :class "btn btn-small btn-quiet" :name "save" :value "1"))))))))))
+                                                   (:p (str (form-button "Save settings" :class "btn btn-small btn-quiet" :name "save" :value "1")))))))))
                                 :active :deployments :notice (flash-notice req)))))
 
 (defun deployments-post (req ent project)

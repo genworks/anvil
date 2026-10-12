@@ -188,6 +188,8 @@ integer id (or its decimal string), or nil."
 (defun touch-project! (project)
   (update-record! project :last-activity (get-universal-time)))
 
+(defvar *project-deleted-hooks* nil "Functions of a project record, called after its deletion.")
+
 (defun delete-project! (project)
   "Remove the project, its issues, merge requests, pipelines, and its
 repository."
@@ -198,6 +200,7 @@ repository."
   (let ((dir (project-repository-path (getf project :path-with-namespace))))
     (when (uiop:directory-exists-p dir)
       (uiop:delete-directory-tree dir :validate t)))
+  (dolist (hook *project-deleted-hooks*) (funcall hook project))
   t)
 
 (defun rename-project! (project new-path)

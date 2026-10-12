@@ -385,7 +385,7 @@ in GitLab's syntax or a form (:and (:branch \"master\") ...)."
       (when parent-name
         (let ((parent (find (name-string parent-name) all-jobs :key (lambda (j) (name-string (first j))) :test #'string=)))
           (unless parent (spec-error "~a extends ~a, which is not a job." name parent-name))
-          (let ((merged (copy-list (rest (compile-sexp-job-raw parent)))))
+          (let ((merged (copy-list (rest parent))))
             (loop for (k v) on fields by #'cddr unless (eq k :extends) do (setf (getf merged k) v))
             (setq fields merged)))))
     (flet ((field (key &optional default) (let ((v (getf fields key :unset))) (if (eq v :unset) (getf defaults key default) v)))
@@ -446,8 +446,6 @@ in GitLab's syntax or a form (:and (:branch \"master\") ...)."
               :kind (cond (deploy :deploy) (lisp :lisp) (t :script))
               :lisp lisp
               :deploy deploy)))))
-
-(defun compile-sexp-job-raw (job) job)
 
 (defun lisp-job-script (lisp)
   "The shell lines of a :lisp job: (:load (\"ci/test.lisp\") :eval

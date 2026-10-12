@@ -9,23 +9,23 @@
 (in-package :anvil)
 
 ;;
-;; The pages' foundation: the site object (one shared instance: the
-;; chrome, the page frame, the pieces every page is made of) and the
+;; The pages' foundation: the site object (the frame every page is
+;; drawn in), the functions that build the pieces of a page, and the
 ;; project view (one per project, its repository facts cached until a
 ;; push).  The pages themselves are the pages-*.lisp files, each a
-;; function of a request answering HTML through `page'.
+;; function of a request answering HTML through `page-html'.
 ;;
-;; HTML is written with cl-who in its native form, as every Gendl page
-;; here is; text from a stranger goes through `hs' on its way in.
+;; HTML is written with cl-who in its native form; text from a stranger
+;; goes through `hs' on its way in.
 ;;
 
 (defun hs (text) (html-escape text))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; cl-who writes literal strings and evaluates other forms for effect,
-  ;; so a bare (hs ...) inside a tag wrote nothing (every badge, name
-  ;; and count on the site was empty, 2026-10-08).  `html' walks its
-  ;; body first and wraps each (hs ...) in body position in (str ...).
+  ;; cl-who prints literal strings and (str ...), (esc ...), (fmt ...)
+  ;; only, and evaluates any other form for effect; `html' walks its
+  ;; body so that an (hs ...) in body position prints, and a POST form
+  ;; is greyed on a read-only forge.
   (defun post-form? (form)
     "Whether FORM is (:form ... :method \"post\" ...), written so."
     (and (eq (first form) :form)
@@ -89,14 +89,33 @@ read-only forge, the same control greyed and inert."
                    :title (hs *read-only-text*) (hs label)))
       (html (:a :class (and (plusp (length class)) class) :style style :href href (hs label)))))
 
-(defvar *site-script* "" "The pages' one script; set below, after the site object.")
+(defparameter *site-script*
+  "(function(){
+document.addEventListener('DOMContentLoaded',function(){
+  var t=document.querySelector('[data-trace]');
+  if(t){var url=t.getAttribute('data-trace'),live=t.getAttribute('data-live')==='1',size=parseInt(t.getAttribute('data-size')||'0',10);
+    function poll(){fetch(url+'?start='+size).then(function(r){return r.json();}).then(function(j){
+      if(j.text){t.textContent+=j.text;size=j.size;window.scrollTo(0,document.body.scrollHeight);}
+      if(j.live){setTimeout(poll,2000);}else{setTimeout(function(){location.reload();},1500);}
+    }).catch(function(){setTimeout(poll,5000);});}
+    if(live)setTimeout(poll,2000);}
+  var ds=document.querySelectorAll('[data-poll]');
+  if(ds.length){setTimeout(function(){location.reload();},10000);}
+  var ms=document.querySelectorAll('details.menu');
+  document.addEventListener('click',function(e){for(var i=0;i<ms.length;i++)if(!ms[i].contains(e.target))ms[i].open=false;});
+  var c=document.querySelector('[data-copy]');
+  if(c){c.addEventListener('click',function(){var v=c.getAttribute('data-copy');if(navigator.clipboard)navigator.clipboard.writeText(v);c.textContent='copied';});}
+});})();"
+  "The pages' one script: the job trace that follows itself, pages that
+poll while something runs, the menus, the copy button.")
 
 (define-object anvil-site (base-object)
 
   :documentation
   (:description "The forge's one shared site object: the frame every
-page is drawn in (head, bar, footer), and the small pieces.  Pages ask
-it with (the-object (site) (page ...)).")
+page is drawn in (head, bar, footer), computed once from the site's
+settings except for the bar, which depends on who is asking.  Pages
+reach it through `page-html'.")
 
   :computed-slots
   ((site-name *site-name*)
@@ -107,13 +126,19 @@ it with (the-object (site) (page ...)).")
           (:meta :name "viewport" :content "width=device-width, initial-scale=1")
           (:link :rel "stylesheet" :href (format nil "/static/anvil.css?v=~a" (the stylesheet-version)))
           (:link :rel "icon" :href "/static/anvil.svg" :type "image/svg+xml")
-          (:script (str *site-script*)))))
+          (:script (str *site-script*))))
+   (footer-html
+    (html (:footer :class "foot"
+            (:span (hs (the site-name)) " · a forge in Common Lisp and Gendl, "
+                   (:a :href "https://gitlab.common-lisp.net/clo/anvil" "Anvil") " " (hs *version*))
+            (:span (:a :href "/help" "Help") " · " (:a :href "/api/v4/version" "API"))))))
 
   :functions
   (("String of HTML: a whole page.  TITLE in the tab; BODY the main
 column; CRUMBS a list of (label . href) over it; NOTICE a line shown
-in a band under the bar; WIDE? for the full width."
-    page (title body &key crumbs notice (wide? nil) (header nil))
+in a band under the bar; HEADER above the main column; WIDE? for the
+full width."
+    page (title body &key crumbs notice wide? header)
     (html
       (str "<!doctype html>")
       (:html :lang "en"
@@ -122,7 +147,7 @@ in a band under the bar; WIDE? for the full width."
         (:body
           (str (the bar-html))
           (when notice (htm (:div :class "notice" (str notice))))
-          (when crumbs (str (the (crumbs-html crumbs))))
+          (when crumbs (str (crumbs-html crumbs)))
           (when header (str header))
           (:main :class (if wide? "main wide" "main") (str body))
           (str (the footer-html))))))
@@ -152,118 +177,121 @@ link, the search, and the signed-in user's menu or the sign-in link."
                           (when (admin?) (htm (:a :href "/admin" "Admin area")))
                           (:form :method "post" :action "/users/sign_out" (:button :type "submit" :class "linklike" "Sign out"))))))
                 (t (htm (str (mutating-link "/users/sign_in" "Sign in" :class "btn btn-small"))
-                        (when *registration-open?* (htm (str (mutating-link "/users/sign_up" "Register" :class "quiet")))))))))))
-
-   (crumbs-html (crumbs)
-    (html (:nav :class "crumbs" :aria-label "Breadcrumb"
-            (loop for (label . href) in crumbs
-                  for first = t then nil
-                  do (unless first (htm (:span :class "crumb-sep" "/")))
-                     (if href (htm (:a :href href (hs label))) (htm (:span (hs label))))))))
-
-   (footer-html ()
-    (html (:footer :class "foot"
-            (:span (hs (the site-name)) " · a forge in Common Lisp and Gendl, "
-                   (:a :href "https://gitlab.common-lisp.net/clo/anvil" "Anvil") " " (hs *version*))
-            (:span (:a :href "/help" "Help") " · " (:a :href "/api/v4/version" "API")))))
-
-   ;; Pieces
-
-   ("String of HTML: a card with an optional title."
-    card (body &key title class)
-    (html (:section :class (format nil "card~@[ ~a~]" class)
-            (when title (htm (:h2 :class "card-title" (str title))))
-            (str body))))
-
-   ("String of HTML: a status badge for a pipeline or job."
-    status-badge (status &key href)
-    (let* ((text (status-text status))
-           (inner (html (:span :class (format nil "badge status-~a" text) (hs text)))))
-      (if href (html (:a :href href :class "badge-link" (str inner))) inner)))
-
-   (avatar (user &key (size "avatar"))
-    (if user
-        (html (:a :class size :href (user-url user) :title (hs (user-display user)) (hs (user-avatar-letter user))))
-        (html (:span :class size "?"))))
-
-   (user-link (user)
-    (if user
-        (html (:a :class "user" :href (user-url user) (hs (user-display user))))
-        (html (:span :class "user" "someone"))))
-
-   (time-html (universal)
-    (if universal
-        (html (:time :datetime (iso-timestamp universal) :title (iso-timestamp universal) (hs (time-ago universal))))
-        ""))
-
-   ("String of HTML: a labeled form field."
-    field (name label &key (type "text") value placeholder required hint rows (autocomplete "off") options checked)
-    (html (:div :class "field"
-            (:label :for name (hs label))
-            (cond (rows (htm (:textarea :id name :name name :rows rows :placeholder placeholder :required required (hs (or value "")))))
-                  (options (htm (:select :id name :name name
-                                  (loop for (v . l) in options
-                                        do (htm (:option :value v :selected (and (equal v value) "selected") (hs l)))))))
-                  ((string= type "checkbox")
-                   (htm (:input :type "checkbox" :id name :name name :value "1" :checked (and checked "checked"))))
-                  (t (htm (:input :type type :id name :name name :value value :placeholder placeholder
-                                  :required required :autocomplete autocomplete))))
-            (when hint (htm (:p :class "hint" (str hint)))))))
-
-   (button (label &key (type "submit") (class "btn") name value formaction confirm)
-    (html (:button :type type :class class :name name :value value :formaction formaction
-                   :onclick (and confirm (format nil "return confirm('~a')" (hs confirm)))
-            (hs label))))
-
-   ("String of HTML: a table."
-    table (columns rows &key class empty)
-    (if (null rows)
-        (html (:p :class "empty" (hs (or empty "Nothing here yet."))))
-        (html (:div :class (format nil "table-wrap~@[ ~a~]" class)
-                (:table
-                  (:thead (:tr (dolist (column columns) (htm (:th (str column))))))
-                  (:tbody (dolist (row rows)
-                            (htm (:tr (dolist (cell row) (htm (:td (str cell)))))))))))))
-
-   ("String of HTML: the tabs of a project page."
-    tabs (items active)
-    (html (:nav :class "tabs"
-            (loop for (key label href count) in items
-                  do (htm (:a :class (if (eq key active) "tab active" "tab") :href href
-                            (hs label)
-                            (when count (htm (:span :class "count" (hs count))))))))))
-
-   (markdown (text &key base-url raw-base-url)
-    (html (:div :class "prose" (str (markdown-html text :base-url base-url :raw-base-url raw-base-url)))))
-
-   (empty-state (title text &key action-href action-label)
-    (html (:div :class "empty-state"
-            (:h3 (hs title))
-            (:p (str text))
-            (when action-href (htm (str (mutating-link action-href action-label :class "btn")))))))
-
-   (oauth-consent-html (app redirect-uri state scope challenge method)
-    (the (page "Authorize"
-               (html (:div :class "narrow"
-                       (:h1 "Authorize " (hs (getf app :name)))
-                       (:p (:strong (hs (getf app :name))) " asks to act on " (hs *site-name*) " as "
-                           (:strong (hs (getf *current-user* :username))) " with the scope " (:code (hs scope)) ".")
-                       (:p :class "hint" "It will be sent back to " (:code (hs redirect-uri)) ".")
-                       (:form :method "post" :action "/oauth/authorize" :class "actions"
-                         (:input :type "hidden" :name "client_id" :value (getf app :client-id))
-                         (:input :type "hidden" :name "redirect_uri" :value redirect-uri)
-                         (:input :type "hidden" :name "state" :value state)
-                         (:input :type "hidden" :name "scope" :value scope)
-                         (:input :type "hidden" :name "code_challenge" :value challenge)
-                         (:input :type "hidden" :name "code_challenge_method" :value method)
-                         (:input :type "hidden" :name "response_type" :value "code")
-                         (str (the (button "Authorize" :name "decision" :value "allow")))
-                         (str (the (button "Deny" :name "decision" :value "deny" :class "btn btn-quiet")))))))))))
+                        (when *registration-open?* (htm (str (mutating-link "/users/sign_up" "Register" :class "quiet")))))))))))))
 
 (defvar *site* nil)
 
 (defun site ()
   (or *site* (setq *site* (make-object 'anvil-site))))
+
+(defun page-html (title body &key crumbs notice wide? header)
+  "A whole page in the site's frame (anvil-site's `page')."
+  (the-object (site) (page title body :crumbs crumbs :notice notice :wide? wide? :header header)))
+
+(defun simple-page (title body-html &key notice)
+  (page-html title (html (:div :class "narrow" (:h1 (hs title)) (str body-html))) :notice notice))
+
+;;; The pieces pages are made of
+
+(defun crumbs-html (crumbs)
+  (html (:nav :class "crumbs" :aria-label "Breadcrumb"
+          (loop for (label . href) in crumbs
+                for first = t then nil
+                do (unless first (htm (:span :class "crumb-sep" "/")))
+                   (if href (htm (:a :href href (hs label))) (htm (:span (hs label))))))))
+
+(defun card-html (body &key title class)
+  (html (:section :class (format nil "card~@[ ~a~]" class)
+          (when title (htm (:h2 :class "card-title" (str title))))
+          (str body))))
+
+(defun status-badge-html (status &key href)
+  "The badge of a pipeline's or a job's STATUS, a link when HREF."
+  (let* ((text (status-text status))
+         (inner (html (:span :class (format nil "badge status-~a" text) (hs text)))))
+    (if href (html (:a :href href :class "badge-link" (str inner))) inner)))
+
+(defun avatar-html (user &key (size "avatar"))
+  (if user
+      (html (:a :class size :href (user-url user) :title (hs (user-display user)) (hs (user-avatar-letter user))))
+      (html (:span :class size "?"))))
+
+(defun user-link-html (user)
+  (if user
+      (html (:a :class "user" :href (user-url user) (hs (user-display user))))
+      (html (:span :class "user" "someone"))))
+
+(defun time-html (universal)
+  (if universal
+      (html (:time :datetime (iso-timestamp universal) :title (iso-timestamp universal) (hs (time-ago universal))))
+      ""))
+
+(defun form-field (name label &key (type "text") value placeholder required hint rows (autocomplete "off") options checked)
+  "A labeled field: a textarea when ROWS, a select when OPTIONS (an
+alist of value and label), a checkbox when TYPE says, else an input."
+  (html (:div :class "field"
+          (:label :for name (hs label))
+          (cond (rows (htm (:textarea :id name :name name :rows rows :placeholder placeholder :required required (hs (or value "")))))
+                (options (htm (:select :id name :name name
+                                (loop for (v . l) in options
+                                      do (htm (:option :value v :selected (and (equal v value) "selected") (hs l)))))))
+                ((string= type "checkbox")
+                 (htm (:input :type "checkbox" :id name :name name :value "1" :checked (and checked "checked"))))
+                (t (htm (:input :type type :id name :name name :value value :placeholder placeholder
+                                :required required :autocomplete autocomplete))))
+          (when hint (htm (:p :class "hint" (str hint)))))))
+
+(defun form-button (label &key (type "submit") (class "btn") name value formaction confirm)
+  (html (:button :type type :class class :name name :value value :formaction formaction
+                 :onclick (and confirm (format nil "return confirm('~a')" (hs confirm)))
+          (hs label))))
+
+(defun html-table (columns rows &key class empty)
+  "A table of ROWS, each a list of HTML strings, under COLUMNS; the
+text EMPTY when there are no rows."
+  (if (null rows)
+      (html (:p :class "empty" (hs (or empty "Nothing here yet."))))
+      (html (:div :class (format nil "table-wrap~@[ ~a~]" class)
+              (:table
+                (:thead (:tr (dolist (column columns) (htm (:th (str column))))))
+                (:tbody (dolist (row rows)
+                          (htm (:tr (dolist (cell row) (htm (:td (str cell)))))))))))))
+
+(defun tabs-html (items active)
+  "The tabs of a project page: ITEMS are (key label href [count])."
+  (html (:nav :class "tabs"
+          (loop for (key label href count) in items
+                do (htm (:a :class (if (eq key active) "tab active" "tab") :href href
+                          (hs label)
+                          (when count (htm (:span :class "count" (hs count))))))))))
+
+(defun prose-html (text &key base-url raw-base-url)
+  "Markdown TEXT, rendered, in a prose block."
+  (html (:div :class "prose" (str (markdown-html text :base-url base-url :raw-base-url raw-base-url)))))
+
+(defun empty-state-html (title text &key action-href action-label)
+  (html (:div :class "empty-state"
+          (:h3 (hs title))
+          (:p (str text))
+          (when action-href (htm (str (mutating-link action-href action-label :class "btn")))))))
+
+(defun oauth-consent-html (app redirect-uri state scope challenge method)
+  (page-html "Authorize"
+             (html (:div :class "narrow"
+                     (:h1 "Authorize " (hs (getf app :name)))
+                     (:p (:strong (hs (getf app :name))) " asks to act on " (hs *site-name*) " as "
+                         (:strong (hs (getf *current-user* :username))) " with the scope " (:code (hs scope)) ".")
+                     (:p :class "hint" "It will be sent back to " (:code (hs redirect-uri)) ".")
+                     (:form :method "post" :action "/oauth/authorize" :class "actions"
+                       (:input :type "hidden" :name "client_id" :value (getf app :client-id))
+                       (:input :type "hidden" :name "redirect_uri" :value redirect-uri)
+                       (:input :type "hidden" :name "state" :value state)
+                       (:input :type "hidden" :name "scope" :value scope)
+                       (:input :type "hidden" :name "code_challenge" :value challenge)
+                       (:input :type "hidden" :name "code_challenge_method" :value method)
+                       (:input :type "hidden" :name "response_type" :value "code")
+                       (str (form-button "Authorize" :name "decision" :value "allow"))
+                       (str (form-button "Deny" :name "decision" :value "deny" :class "btn btn-quiet")))))))
 
 (defun static-directory ()
   (or (ignore-errors (merge-pathnames "static/" (glisp:system-home :anvil)))
@@ -271,29 +299,6 @@ link, the search, and the signed-in user's menu or the sign-in link."
 
 (defun static-file (name)
   (merge-pathnames name (static-directory)))
-
-(defparameter *site-script*
-  "(function(){
-document.addEventListener('DOMContentLoaded',function(){
-  var t=document.querySelector('[data-trace]');
-  if(t){var url=t.getAttribute('data-trace'),live=t.getAttribute('data-live')==='1',size=parseInt(t.getAttribute('data-size')||'0',10);
-    function poll(){fetch(url+'?start='+size).then(function(r){return r.json();}).then(function(j){
-      if(j.text){t.textContent+=j.text;size=j.size;window.scrollTo(0,document.body.scrollHeight);}
-      if(j.live){setTimeout(poll,2000);}else{setTimeout(function(){location.reload();},1500);}
-    }).catch(function(){setTimeout(poll,5000);});}
-    if(live)setTimeout(poll,2000);}
-  var ds=document.querySelectorAll('[data-poll]');
-  if(ds.length){setTimeout(function(){location.reload();},10000);}
-  var ms=document.querySelectorAll('details.menu');
-  document.addEventListener('click',function(e){for(var i=0;i<ms.length;i++)if(!ms[i].contains(e.target))ms[i].open=false;});
-  var c=document.querySelector('[data-copy]');
-  if(c){c.addEventListener('click',function(){var v=c.getAttribute('data-copy');if(navigator.clipboard)navigator.clipboard.writeText(v);c.textContent='copied';});}
-});})();"
-  "The pages' one script: the job trace that follows itself, pages that
-poll while something runs, the menus, the copy button.")
-
-(defun simple-page (title body-html &key notice)
-  (the-object (site) (page title (html (:div :class "narrow" (:h1 (hs title)) (str body-html))) :notice notice)))
 
 ;;; The project view: repository facts cached until a push
 
@@ -362,6 +367,8 @@ the next request.")
 (defun forget-project-view! (project)
   (bt:with-lock-held (*project-views-lock*) (remhash (getf project :id) *project-views*)))
 
+(pushnew 'forget-project-view! *project-deleted-hooks*)
+
 ;;; What every page handler shares
 
 (defmacro with-page-errors ((req ent) &body body)
@@ -376,18 +383,18 @@ error a 500 page (and a log line)."
        (page-error ,req ,ent 400 (princ-to-string e)))
      (error (e)
        (log-line "~a ~a: ~a" (http-method ,req) (request-path ,req) e)
-       (page-error ,req ,ent 500 (format nil "Something went wrong: ~a" e)))))
+       (page-error ,req ,ent 500 "Something went wrong; the forge's log says what."))))
 
 (defun page-error (req ent status text)
   (if (starts-with? "/api/" (request-path req))
       (respond-error-json req ent status text)
       (respond-html req ent
-                    (the-object (site) (page (format nil "~d" status)
-                                             (html (:div :class "narrow"
-                                                     (:h1 (hs (case status (404 "Not found") (403 "Not allowed") (401 "Sign in") (t (format nil "~d" status)))))
-                                                     (:p (hs text))
-                                                     (when (and (= status 401) (not *current-user*))
-                                                       (htm (:p (str (mutating-link (format nil "/users/sign_in?return_to=~a" (url-encode (request-path req))) "Sign in" :class "btn")))))))))
+                    (page-html (format nil "~d" status)
+                               (html (:div :class "narrow"
+                                       (:h1 (hs (case status (404 "Not found") (403 "Not allowed") (401 "Sign in") (t (format nil "~d" status)))))
+                                       (:p (hs text))
+                                       (when (and (= status 401) (not *current-user*))
+                                         (htm (:p (str (mutating-link (format nil "/users/sign_in?return_to=~a" (url-encode (request-path req))) "Sign in" :class "btn"))))))))
                     :status status)))
 
 (defun flash-notice (req)

@@ -212,7 +212,7 @@ merge_request), with ACTION open, close, reopen, update, merge."
 ;;; client side of receive-pack over smart HTTP.
 
 (defun push-mirrors! (project)
-  (dolist (mirror (getf project :mirrors))
+  (dolist (mirror (and *push-mirrors?* (getf project :mirrors)))
     (handler-case (push-mirror! project mirror)
       (error (e)
         (log-line "mirror ~a: ~a" (getf mirror :url) e)

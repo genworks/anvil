@@ -280,12 +280,12 @@ plain scalar (which may continue on the lines below)."
       ((char= (char rest 0) #\") (incf *yat*) (parse-double-quoted (strcat rest (continuation-lines indent)) number))
       ((char= (char rest 0) #\') (incf *yat*) (parse-single-quoted (strcat rest (continuation-lines indent)) number))
       (t (incf *yat*)
-         (plain-scalar-value (strcat rest (continuation-lines indent :fold t)))))))
+         (plain-scalar-value (strcat rest (continuation-lines indent)))))))
 
-(defun continuation-lines (indent &key fold)
-  "The lines after the current one that continue a scalar: indented
-more than INDENT and not a key or an item at that depth.  Joined with a
-space when FOLD, else as they are."
+(defun continuation-lines (indent)
+  "The lines after the current one that continue a scalar -- indented
+more than INDENT and not a key or an item at that depth -- each
+preceded by a space."
   (let ((out (make-string-output-stream)))
     (loop
       (let ((line (ycurrent)))
@@ -295,7 +295,7 @@ space when FOLD, else as they are."
         (let ((content (yline-content line)))
           (when (or (mapping-key-end content) (sequence-item? content))
             (return))
-          (write-string (if fold " " " ") out)
+          (write-char #\Space out)
           (write-string content out)
           (incf *yat*))))
     (get-output-stream-string out)))
@@ -305,7 +305,7 @@ space when FOLD, else as they are."
 its line): the lines at INDENT or more, folded."
   (let ((line (ycurrent)))
     (incf *yat*)
-    (let ((text (strcat (yline-content line) (continuation-lines (1- indent) :fold t))))
+    (let ((text (strcat (yline-content line) (continuation-lines (1- indent)))))
       (cond ((char= (char text 0) #\") (parse-double-quoted text (yline-number line)))
             ((char= (char text 0) #\') (parse-single-quoted text (yline-number line)))
             ((char= (char text 0) #\[) (parse-flow text (yline-number line)))

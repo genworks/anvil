@@ -27,6 +27,7 @@
            #:*runner-parallelism*
            #:*docker-socket*
            #:*deploy-houses*
+           #:*push-mirrors?*
            #:*read-only?*
            #:*read-only-text*
            #:read-only-environment?

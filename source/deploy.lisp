@@ -9,16 +9,11 @@
 (in-package :anvil)
 
 ;;
-;; Deployment: a project into a hosting house -- common-lisp.net's lab,
-;; which checks it, reviews it and puts it up at <name>.common-lisp.app.
-;; The forge already knows who is a Maintainer, so the Deploy button
-;; posts the request to the lab's hosting/request door with the shared
-;; secret and no OAuth round trip; the request's state is read from
-;; hosting/state.  A :deploy job in a pipeline does the same at the end
-;; of a green run.  Before either, the profile is read in process when
-;; Monocle is loaded: image.sexp and monetize.sexp from the tree, their
-;; faults listed, so an author sees what is missing before pressing
-;; anything.
+;; Deployment of a project into a hosting house (common-lisp.net's lab):
+;; the Deploy button and the :deploy job post to the lab's hosting
+;; door with the shared secret and follow the request through
+;; hosting/state; the hosting profile (image.sexp, monetize.sexp) is
+;; read in process when Monocle is loaded.
 ;;
 
 (defun deploy-house (key)

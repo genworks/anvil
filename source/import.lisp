@@ -9,33 +9,19 @@
 (in-package :anvil)
 
 ;;
-;; Importing from a GitLab: a group with its projects, or single
-;; projects, brought here -- the repository through Ingot's fetch over
-;; smart HTTP (the client side of upload-pack, with AllegroServe's
-;; client lent to Ingot as the transport), the issues and merge
-;; requests with their notes through GitLab's REST API.  What is
-;; imported becomes the same records a native thing has, so no page
-;; and no API answer knows the difference; each keeps where it came
-;; from under :imported-from, and an issue or merge request keeps its
-;; number, so a link that worked on GitLab works here.
-;;
-;; People are not imported.  An issue, a merge request or a note is
-;; authored here by a user of the same username when there is one,
-;; else by the importing user, and then its text begins with a line
-;; saying who wrote it there and when.
-;;
-;; Importing again is safe: a project that exists is fetched up to
-;; date, and only the issues and merge requests not here yet are added.
+;; Importing from a GitLab: repositories through Ingot's fetch with
+;; AllegroServe's client as the transport, issues and merge requests
+;; with their notes through GitLab's REST API, written as the native
+;; records with their numbers kept and :imported-from on each.  People
+;; are not imported: a user of the same username here is matched, else
+;; the importer authors the text with a first line naming who wrote
+;; it there.  Importing again brings only what is new.
 ;;
 
 (defparameter *git-user-agent* "git/anvil-import"
-  "What the fetch client calls itself.  It begins with git/ because
-common-lisp.net's bot challenge (Anubis) passes a git client by its
-user agent together with an Accept-Encoding that names gzip, and
-answers its challenge page to anything else.  The transport names
-gzip at q=0: the rule is satisfied and the answer comes plain, which
-spares AllegroServe's client an inflating stream it cannot make on
-every Lisp.")
+  "What the fetch client calls itself: common-lisp.net's bot challenge
+(Anubis) passes a client whose user agent begins with git/ and whose
+Accept-Encoding names gzip, and challenges anything else.")
 
 (defparameter *fetch-timeout* 1800
   "Seconds. How long one git request to another server may take: a
@@ -57,11 +43,11 @@ password-or-token), or nil for a public repository."
              (address (if body
                           (format nil "~a/~a" url service-name)
                           (format nil "~a/info/refs?service=~a" url service-name)))
-             ;; the user agent goes through the client's own keyword: given
-             ;; as a header it rides behind the client's default one, and
-             ;; the challenge reads the first
-             ;; the same for Accept: a second Accept line beside the
-             ;; client's own is read as a bot too
+             ;; User-Agent and Accept go through the client's own keywords:
+             ;; given as headers they ride beside its defaults, and the
+             ;; challenge reads the first of each.  gzip at q=0 meets the
+             ;; rule while the answer comes plain, which AllegroServe's
+             ;; client cannot inflate on every Lisp.
              (headers (list (cons "Accept-Encoding" "identity, gzip;q=0"))))
         (multiple-value-bind (answer status response-headers)
             (net.aserve.client:do-http-request address

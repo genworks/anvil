@@ -131,10 +131,9 @@ compile): kept, failed, with the reason, so the push shows it."
           (when container (docker-kill container) (docker-remove container))))))
   (record :pipeline (getf pipeline :id)))
 
-(defun retry-job! (job user)
+(defun retry-job! (job)
   "A fresh job record for JOB's specification, in its pipeline, and
 the runner woken.  Answers the new job."
-  (declare (ignore user))
   (let* ((pipeline (job-pipeline job))
          (new (save-record! (new-record :job :pipeline-id (getf pipeline :id) :project-id (getf job :project-id)
                                              :name (getf job :name) :stage (getf job :stage)
@@ -150,9 +149,8 @@ the runner woken.  Answers the new job."
     (wake-runner!)
     new))
 
-(defun play-job! (job user)
+(defun play-job! (job)
   "Start a manual job."
-  (declare (ignore user))
   (when (eq (getf job :status) :manual)
     (set-job-status! job :created)
     (let ((pipeline (job-pipeline job)))
@@ -277,8 +275,7 @@ size of the file."
 
 ;;; Executing a job
 
-(defun job-image (job project)
-  (declare (ignore project))
+(defun job-image (job)
   (or (getf (getf job :spec) :image) "genworks/gendl:devo-ccl"))
 
 (defun lisp-of-image (image)
@@ -323,7 +320,7 @@ project's, the pipeline's, the job's own."
                   (cons "CI_JOB_STAGE" (getf job :stage))
                   (cons "CI_JOB_URL" (strcat *site-url* (job-url project job)))
                   (cons "CI_REGISTRY" "")
-                  (cons "ANVIL_LISP" (lisp-of-image (job-image job project)))))))
+                  (cons "ANVIL_LISP" (lisp-of-image (job-image job)))))))
 
 (defun ref-slug (ref)
   (string-trim "-" (subseq (ppcre:regex-replace-all "[^a-z0-9]+" (string-downcase ref) "-") 0 (min 63 (length ref)))))
@@ -343,18 +340,18 @@ project's, the pipeline's, the job's own."
   (format nil "'~a'" (ppcre:regex-replace-all "'" text "'\\\\''")))
 
 (defun job-shell-script (spec)
-  "One sh script: before_script and script under set -e, each line
-echoed as GitLab does; after_script regardless; the main status kept."
-  (with-output-to-string (out)
-    (format out "main() {~%set -e~%")
-    (dolist (line (append (getf spec :before-script) (getf spec :script)))
-      (format out "printf '%s\\n' ~a~%~a~%" (shell-quote (strcat "$ " line)) line))
-    (format out "}~%main~%status=$?~%")
-    (when (getf spec :after-script)
-      (format out "set +e~%")
-      (dolist (line (getf spec :after-script))
-        (format out "printf '%s\\n' ~a~%~a~%" (shell-quote (strcat "$ " line)) line)))
-    (format out "exit $status~%")))
+  "One sh script: before_script and script in a subshell under set -e,
+each line echoed as GitLab does, so that a failing line ends the main
+part and after_script still runs; the main part's status is the job's."
+  (flet ((lines (out lines)
+           (dolist (line lines)
+             (format out "printf '%s\\n' ~a~%~a~%" (shell-quote (strcat "$ " line)) line))))
+    (with-output-to-string (out)
+      (format out "(~%set -e~%")
+      (lines out (append (getf spec :before-script) (getf spec :script)))
+      (format out ")~%status=$?~%")
+      (lines out (getf spec :after-script))
+      (format out "exit $status~%"))))
 
 (defun job-kind (job)
   "What kind of job the record is: :script, :lisp or :deploy."
@@ -375,7 +372,7 @@ echoed as GitLab does; after_script regardless; the main status kept."
 
 (defun execute-docker-job! (job pipeline project)
   (let* ((spec (getf job :spec))
-         (image (job-image job project))
+         (image (job-image job))
          (repository (project-repository project))
          (variables (unique-variables (job-variables job pipeline project)))
          (env (mapcar (lambda (pair) (format nil "~a=~a" (car pair) (cdr pair))) variables))
@@ -414,7 +411,7 @@ echoed as GitLab does; after_script regardless; the main status kept."
                             :labels (list (cons "anvil.job" (princ-to-string (getf job :id)))
                                           (cons "anvil.project" (getf project :path-with-namespace)))
                             :memory *runner-memory-bytes*
-                            :network-mode (or network (if (getf spec :services) "bridge" "bridge"))
+                            :network-mode (or network "bridge")
                             :name (format nil "anvil-job-~d" (getf job :id))))
            (update-record! job :container container)
            ;; the working tree, and the artifacts of earlier jobs
@@ -488,7 +485,7 @@ tar whose entries are relative to the project directory."
   (let ((buffer (ingot::make-buffer (* 256 1024)))
         (count 0))
     (dolist (path (getf artifacts :paths))
-      (let* ((clean (string-right-trim "/" (string-left-trim "./" path)))
+      (let* ((clean (string-right-trim "/" (if (starts-with? "./" path) (subseq path 2) path)))
              (full (format nil "~a/~a" project-dir clean))
              (tar (handler-case (docker-get-archive container full)
                     (error () nil))))

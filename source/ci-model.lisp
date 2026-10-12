@@ -72,8 +72,7 @@ it runs always), and not waiting for a hand."
          (not (eq (the when-to-run) :manual))
          (or (the prerequisites-met?)
              (and (member (the when-to-run) '(:always :on-failure))
-                  (every (lambda (job) (the-object job done?)) (the prerequisites)))
-             (and (eq (the when-to-run) :on-failure) nil))
+                  (every (lambda (job) (the-object job done?)) (the prerequisites))))
          (or (not (eq (the when-to-run) :on-failure))
              (some (lambda (job) (and (the-object job done?) (not (the-object job succeeded?)))) (the prerequisites)))))
 
@@ -235,5 +234,3 @@ follows.  Answers the updated job record."
 (defun status-text (status)
   (string-downcase (symbol-name (or status :created))))
 
-(defun status-from-text (text)
-  (and text (intern (string-upcase text) :keyword)))

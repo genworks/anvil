@@ -54,7 +54,7 @@ that names a branch or tag wins; else the first segment is the ref."
           (t (blob-page req ent project ref path)))))
 
 (defun blob-page (req ent project ref path)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (commit-oid (or (ingot:resolve-commit repository ref) (not-found "No such ref."))))
     (multiple-value-bind (data entry) (ingot:blob-at repository commit-oid path)
@@ -78,7 +78,7 @@ that names a branch or tag wins; else the first segment is the ref."
                                                   (htm (str (mutating-link (format nil "~a/-/edit/~a/~a" url (url-encode ref) (path-encode path)) "Edit" :class "btn btn-small btn-quiet"))))
                                                 (when (can-push-branch? project ref)
                                                   (htm (:form :method "post" :action (format nil "~a/-/delete/~a/~a" url (url-encode ref) (path-encode path)) :style "display:inline"
-                                                         (str (the-object site (button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete ~a on ~a?" name ref)))))))))
+                                                         (str (form-button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete ~a on ~a?" name ref))))))))
                                             (cond (big? (htm (:p :class "empty" :style "padding:1rem" "A large file: " (:a :href raw-url "download it") ".")))
                                                   ((image-file? name) (htm (:p :style "padding:1rem" (:img :src raw-url :alt name :style "max-width:100%"))))
                                                   (binary? (htm (:p :class "empty" :style "padding:1rem" "A binary file: " (:a :href raw-url "download it") ".")))
@@ -130,7 +130,7 @@ that names a branch or tag wins; else the first segment is the ref."
 
 (defun edit-page (req ent project ref path &key new? error content)
   (unless (can-push-branch? project ref) (forbidden "You may not push to this branch."))
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (commit-oid (ingot:resolve-commit repository ref))
          (existing (and (not new?) commit-oid (ingot:blob-at repository commit-oid path)))
@@ -141,15 +141,15 @@ that names a branch or tag wins; else the first segment is the ref."
                                 (html (when error (htm (:p :class "profile-bad" (hs error))))
                                       (:form :method "post" :action (format nil "~a/-/~a/~a~@[/~a~]" url (if new? "new" "edit") (url-encode ref) (and (plusp (length path)) (path-encode path)))
                                         (when new?
-                                          (str (the-object site (field "name" "File name" :required t :value (param req "name")
-                                                                       :hint (format nil "Under ~a~a on ~a." (getf project :path) (if (plusp (length path)) (format nil "/~a" path) "") ref)))))
+                                          (str (form-field "name" "File name" :required t :value (param req "name")
+                                                                       :hint (format nil "Under ~a~a on ~a." (getf project :path) (if (plusp (length path)) (format nil "/~a" path) "") ref))))
                                         (:div :class "field"
                                           (:label :for "content" "Content")
                                           (:textarea :id "content" :name "content" :rows 28 :spellcheck "false" :style "width:100%;font-family:var(--mono)" (hs text)))
-                                        (str (the-object site (field "message" "Commit message" :required t
-                                                                     :value (or (param req "message") (if new? "" (format nil "Update ~a" (ingot::last-path-part path)))))))
+                                        (str (form-field "message" "Commit message" :required t
+                                                                     :value (or (param req "message") (if new? "" (format nil "Update ~a" (ingot::last-path-part path))))))
                                         (:p :class "hint" "Committed to " (:code (hs ref)) " as " (hs (user-display *current-user*)) ".")
-                                        (str (the-object site (button (if new? "Create file" "Commit changes"))))
+                                        (str (form-button (if new? "Create file" "Commit changes")))
                                         " " (:a :class "btn btn-quiet" :href (if new? (format nil "~a/-/tree/~a~@[/~a~]" url (url-encode ref) (and (plusp (length path)) (path-encode path)))
                                                                                   (format nil "~a/-/blob/~a/~a" url (url-encode ref) (path-encode path)))
                                               "Cancel")))

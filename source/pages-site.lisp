@@ -15,12 +15,11 @@
 ;;
 
 (defun project-card-html (project)
-  (let ((site (site)))
-    (html (:div :class "project-card"
-            (:h3 (:a :href (project-url project) (hs (getf project :path-with-namespace)))
-                 " " (:span :class "visibility" (hs (string-downcase (symbol-name (getf project :visibility))))))
-            (:p (hs (if (blank? (getf project :description)) "No description." (getf project :description))))
-            (:p :class "quiet" "Updated " (str (the-object site (time-html (or (getf project :last-activity) (getf project :created))))))))))
+  (html (:div :class "project-card"
+              (:h3 (:a :href (project-url project) (hs (getf project :path-with-namespace)))
+                   " " (:span :class "visibility" (hs (string-downcase (symbol-name (getf project :visibility))))))
+              (:p (hs (if (blank? (getf project :description)) "No description." (getf project :description))))
+              (:p :class "quiet" "Updated " (str (time-html (or (getf project :last-activity) (getf project :created))))))))
 
 (defun project-cards (projects &key empty)
   (if projects
@@ -41,48 +40,48 @@
                                       projects)
                        projects)))
     (respond-html req ent
-                  (the-object (site) (page (if q (format nil "Search: ~a" q) "Explore")
+                  (page-html (if q (format nil "Search: ~a" q) "Explore")
                                            (html (:h1 (if q (htm "Projects matching " (:em (hs q))) (htm "Explore projects")))
                                                  (:p :class "quiet" (hs (plural (length projects) "project")))
-                                                 (str (project-cards projects :empty "Nothing matches."))))))))
+                                                 (str (project-cards projects :empty "Nothing matches.")))))))
 
 (defun explore-groups-page (req ent)
   (respond-html req ent
-                (the-object (site) (page "Groups"
+                (page-html "Groups"
                                          (html (:h1 "Groups")
                                                (when *current-user* (htm (:p (str (mutating-link "/groups/new" "New group" :class "btn btn-small")))))
-                                               (str (the-object (site) (table '("Group" "Projects" "Description")
+                                               (str (html-table '("Group" "Projects" "Description")
                                                                               (mapcar (lambda (g) (list (html (:a :href (group-url g) (hs (getf g :full-path))))
                                                                                                         (princ-to-string (length (remove-if-not #'can-read-project? (group-projects g))))
                                                                                                         (hs (getf g :description))))
                                                                                       (visible-groups))
-                                                                              :empty "No groups yet."))))))))
+                                                                              :empty "No groups yet."))))))
 
 (defun dashboard-page (req ent)
   (let ((mine (sort (member-projects *current-user*) #'> :key (lambda (p) (or (getf p :last-activity) 0)))))
     (respond-html req ent
-                  (the-object (site) (page "Your projects"
+                  (page-html "Your projects"
                                            (html (:h1 "Your projects")
                                                  (str (project-cards mine :empty "You are not a member of any project yet."))
                                                  (:p :class "actions" (str (mutating-link "/projects/new" "New project" :class "btn"))
-                                                     (:a :class "btn btn-quiet" :href "/explore" "Explore"))))))))
+                                                     (:a :class "btn btn-quiet" :href "/explore" "Explore")))))))
 
 ;;; Sign in, sign up, sign out
 
 (defun sign-in-page (req ent &key error)
   (let ((return-to (or (param req "return_to") "/")))
     (respond-html req ent
-                  (the-object (site) (page "Sign in"
+                  (page-html "Sign in"
                                            (html (:div :class "narrow"
                                                    (:h1 "Sign in")
                                                    (when error (htm (:p :class "profile-bad" (hs error))))
                                                    (:form :method "post" :action "/users/sign_in"
                                                      (:input :type "hidden" :name "return_to" :value return-to)
-                                                     (str (the-object (site) (field "login" "Username or email" :required t :autocomplete "username")))
-                                                     (str (the-object (site) (field "password" "Password" :type "password" :required t :autocomplete "current-password")))
-                                                     (str (the-object (site) (button "Sign in"))))
+                                                     (str (form-field "login" "Username or email" :required t :autocomplete "username"))
+                                                     (str (form-field "password" "Password" :type "password" :required t :autocomplete "current-password"))
+                                                     (str (form-button "Sign in")))
                                                    (when *registration-open?*
-                                                     (htm (:p :class "hint" "No account? " (str (mutating-link "/users/sign_up" "Register")) "."))))))))
+                                                     (htm (:p :class "hint" "No account? " (str (mutating-link "/users/sign_up" "Register")) ".")))))))
                                      :status (if error 401 200)))
 
 (defun sign-in-post (req ent)
@@ -90,7 +89,7 @@
          (user (find-user login)))
     (if (and user (user-active? user) (check-password password (getf user :password)))
         (let ((session (make-session! user)))
-          (redirect req ent (let ((to (param req "return_to"))) (if (and to (starts-with? "/" to)) to "/"))
+          (redirect req ent (let ((to (param req "return_to"))) (if (local-path? to) to "/"))
                     :headers (list :set-cookie (session-cookie-header session))))
         (sign-in-page req ent :error "That is not a name and password we know."))))
 
@@ -101,17 +100,17 @@
 (defun sign-up-page (req ent &key error values)
   (unless *registration-open?* (forbidden "Registration is closed; an administrator makes accounts."))
   (respond-html req ent
-                (the-object (site) (page "Register"
+                (page-html "Register"
                                          (html (:div :class "narrow"
                                                  (:h1 "Register")
                                                  (when error (htm (:p :class "profile-bad" (hs error))))
                                                  (:form :method "post" :action "/users/sign_up"
-                                                   (str (the-object (site) (field "username" "Username" :required t :value (getf values :username)
-                                                                                  :hint "Letters, digits, dot, hyphen, underscore; your projects live under it.")))
-                                                   (str (the-object (site) (field "name" "Name" :value (getf values :name))))
-                                                   (str (the-object (site) (field "email" "Email" :type "email" :required t :value (getf values :email))))
-                                                   (str (the-object (site) (field "password" "Password" :type "password" :required t :hint "Eight characters at least.")))
-                                                   (str (the-object (site) (button "Register")))))))))
+                                                   (str (form-field "username" "Username" :required t :value (getf values :username)
+                                                                                  :hint "Letters, digits, dot, hyphen, underscore; your projects live under it."))
+                                                   (str (form-field "name" "Name" :value (getf values :name)))
+                                                   (str (form-field "email" "Email" :type "email" :required t :value (getf values :email)))
+                                                   (str (form-field "password" "Password" :type "password" :required t :hint "Eight characters at least."))
+                                                   (str (form-button "Register")))))))
                                    :status (if error 400 200))
 
 (defun sign-up-post (req ent)
@@ -126,23 +125,23 @@
 ;;; The account
 
 (defun profile-page (req ent &key notice)
-  (let ((user (require-user)) (site (site)))
+  (let ((user (require-user)))
     (respond-html req ent
-                  (the-object site (page "Settings"
+                  (page-html "Settings"
                                          (html (:div :class "narrow"
                                                  (:h1 "Your settings")
                                                  (:form :method "post" :action "/-/profile" :class "card"
-                                                   (str (the-object site (field "name" "Name" :value (getf user :name))))
-                                                   (str (the-object site (field "email" "Email" :type "email" :value (getf user :email))))
-                                                   (str (the-object site (field "bio" "About you" :rows 3 :value (getf user :bio))))
-                                                   (str (the-object site (button "Save"))))
+                                                   (str (form-field "name" "Name" :value (getf user :name)))
+                                                   (str (form-field "email" "Email" :type "email" :value (getf user :email)))
+                                                   (str (form-field "bio" "About you" :rows 3 :value (getf user :bio)))
+                                                   (str (form-button "Save")))
                                                  (:form :method "post" :action "/-/profile/password" :class "card"
                                                    (:h2 :class "card-title" "Password")
-                                                   (str (the-object site (field "current" "Current password" :type "password" :required t)))
-                                                   (str (the-object site (field "password" "New password" :type "password" :required t)))
-                                                   (str (the-object site (button "Change password"))))
+                                                   (str (form-field "current" "Current password" :type "password" :required t))
+                                                   (str (form-field "password" "New password" :type "password" :required t))
+                                                   (str (form-button "Change password")))
                                                  (:p (:a :href "/-/profile/tokens" "Personal access tokens") " · " (:a :href "/-/profile/keys" "SSH keys"))))
-                                         :notice (or notice (flash-notice req)))))))
+                                         :notice (or notice (flash-notice req))))))
 
 (defun profile-post (req ent)
   (let ((user (require-user)))
@@ -159,9 +158,9 @@
              (redirect req ent (with-notice "/-/profile" "The password is changed."))))))
 
 (defun tokens-page (req ent &key new-token)
-  (let ((user (require-user)) (site (site)))
+  (let ((user (require-user)))
     (respond-html req ent
-                  (the-object site (page "Access tokens"
+                  (page-html "Access tokens"
                                          (html (:div :class "narrow"
                                                  (:h1 "Personal access tokens")
                                                  (:p "A token stands in for your password with git over HTTPS and with the API. It is shown once.")
@@ -170,25 +169,25 @@
                                                           (:p :class "profile-ok" "Your new token. Copy it now; it will not be shown again.")
                                                           (:pre (hs new-token)))))
                                                  (:form :method "post" :action "/-/profile/tokens" :class "card"
-                                                   (str (the-object site (field "name" "Name" :required t :placeholder "laptop, CI, the lab")))
+                                                   (str (form-field "name" "Name" :required t :placeholder "laptop, CI, the lab"))
                                                    (:div :class "field" (:label "Scopes")
                                                      (dolist (scope '("api" "read_api" "read_user" "read_repository" "write_repository"))
                                                        (htm (:label :style "display:block;font-weight:normal"
                                                               (:input :type "checkbox" :name "scopes" :value scope :checked (and (member scope '("api") :test #'string=) "checked"))
                                                               (hs scope)))))
-                                                   (str (the-object site (field "expires" "Expires (days, empty for never)" :type "number" :value "")))
-                                                   (str (the-object site (button "Create token"))))
-                                                 (str (the-object site (table '("Name" "Scopes" "Created" "Last used" "")
+                                                   (str (form-field "expires" "Expires (days, empty for never)" :type "number" :value ""))
+                                                   (str (form-button "Create token")))
+                                                 (str (html-table '("Name" "Scopes" "Created" "Last used" "")
                                                                               (mapcar (lambda (token)
                                                                                         (list (hs (getf token :name))
                                                                                               (hs (format nil "~{~a~^, ~}" (getf token :scopes)))
-                                                                                              (the-object site (time-html (getf token :created)))
+                                                                                              (time-html (getf token :created))
                                                                                               (if (getf token :last-used) (hs (princ-to-string (getf token :last-used))) "never")
                                                                                               (html (:form :method "post" :action (format nil "/-/profile/tokens/~d/revoke" (getf token :id))
-                                                                                                      (str (the-object site (button "Revoke" :class "btn btn-small btn-quiet")))))))
+                                                                                                      (str (form-button "Revoke" :class "btn btn-small btn-quiet"))))))
                                                                                       (user-tokens user))
-                                                                              :empty "No tokens yet.")))))
-                                         :notice (flash-notice req))))))
+                                                                              :empty "No tokens yet."))))
+                                         :notice (flash-notice req)))))
 
 (defun tokens-post (req ent)
   (let* ((user (require-user))
@@ -205,24 +204,24 @@
     (redirect req ent (with-notice "/-/profile/tokens" "Revoked."))))
 
 (defun keys-page (req ent)
-  (let ((user (require-user)) (site (site)))
+  (let ((user (require-user)))
     (respond-html req ent
-                  (the-object site (page "SSH keys"
+                  (page-html "SSH keys"
                                          (html (:div :class "narrow"
                                                  (:h1 "SSH keys")
                                                  (:p :class "hint" "Kept for the day this forge answers over ssh; today git goes over HTTPS with a token.")
                                                  (:form :method "post" :action "/-/profile/keys" :class "card"
-                                                   (str (the-object site (field "title" "Title" :required t)))
-                                                   (str (the-object site (field "key" "Key" :rows 3 :required t :placeholder "ssh-ed25519 AAAA...")))
-                                                   (str (the-object site (button "Add key"))))
-                                                 (str (the-object site (table '("Title" "Key" "")
+                                                   (str (form-field "title" "Title" :required t))
+                                                   (str (form-field "key" "Key" :rows 3 :required t :placeholder "ssh-ed25519 AAAA..."))
+                                                   (str (form-button "Add key")))
+                                                 (str (html-table '("Title" "Key" "")
                                                                               (mapcar (lambda (key)
                                                                                         (list (hs (getf key :title))
                                                                                               (html (:code (hs (subseq (getf key :key) 0 (min 40 (length (getf key :key)))))) "…")
                                                                                               (html (:form :method "post" :action (format nil "/-/profile/keys/~d/delete" (getf key :id))
-                                                                                                      (str (the-object site (button "Remove" :class "btn btn-small btn-quiet")))))))
+                                                                                                      (str (form-button "Remove" :class "btn btn-small btn-quiet"))))))
                                                                                       (getf user :ssh-keys))
-                                                                              :empty "No keys."))))))))))
+                                                                              :empty "No keys."))))))))
 
 (defun keys-post (req ent)
   (let ((user (require-user)) (key (trim (param req "key"))))
@@ -245,24 +244,24 @@
                   collect (cons (format nil "group:~d" (getf group :id)) (getf group :full-path)))))
 
 (defun new-project-page (req ent &key error)
-  (let ((user (require-user)) (site (site)))
+  (let ((user (require-user)))
     (respond-html req ent
-                  (the-object site (page "New project"
+                  (page-html "New project"
                                          (html (:div :class "narrow"
                                                  (:h1 "New project")
                                                  (when error (htm (:p :class "profile-bad" (hs error))))
                                                  (:form :method "post" :action "/projects/new"
-                                                   (str (the-object site (field "namespace" "Namespace" :options (namespace-choices user)
-                                                                                :value (let ((g (url-query-value req "group"))) (if g (format nil "group:~a" g) (format nil "user:~d" (getf user :id)))))))
-                                                   (str (the-object site (field "path" "Project path" :required t :value (param req "path")
-                                                                                :hint "The address: letters, digits, dot, hyphen, underscore.")))
-                                                   (str (the-object site (field "name" "Name" :value (param req "name"))))
-                                                   (str (the-object site (field "description" "Description" :rows 2 :value (param req "description"))))
-                                                   (str (the-object site (field "visibility" "Visibility" :options '(("public" . "Public: anyone may read") ("internal" . "Internal: anyone signed in") ("private" . "Private: members only"))
-                                                                                :value (or (param req "visibility") (string-downcase (symbol-name *default-visibility*))))))
-                                                   (str (the-object site (field "default_branch" "Default branch" :value *default-branch-name*)))
-                                                   (str (the-object site (field "readme" "Start with a README" :type "checkbox")))
-                                                   (str (the-object site (button "Create project"))))))))
+                                                   (str (form-field "namespace" "Namespace" :options (namespace-choices user)
+                                                                                :value (let ((g (url-query-value req "group"))) (if g (format nil "group:~a" g) (format nil "user:~d" (getf user :id))))))
+                                                   (str (form-field "path" "Project path" :required t :value (param req "path")
+                                                                                :hint "The address: letters, digits, dot, hyphen, underscore."))
+                                                   (str (form-field "name" "Name" :value (param req "name")))
+                                                   (str (form-field "description" "Description" :rows 2 :value (param req "description")))
+                                                   (str (form-field "visibility" "Visibility" :options '(("public" . "Public: anyone may read") ("internal" . "Internal: anyone signed in") ("private" . "Private: members only"))
+                                                                                :value (or (param req "visibility") (string-downcase (symbol-name *default-visibility*)))))
+                                                   (str (form-field "default_branch" "Default branch" :value *default-branch-name*))
+                                                   (str (form-field "readme" "Start with a README" :type "checkbox"))
+                                                   (str (form-button "Create project"))))))
                                          :status (if error 400 200))))
 
 (defun parse-namespace-choice (text user)
@@ -289,20 +288,19 @@
       (http-error (e) (new-project-page req ent :error (http-error-text e))))))
 
 (defun new-group-page (req ent &key error)
-  (let ((site (site)))
-    (require-user)
-    (respond-html req ent
-                  (the-object site (page "New group"
-                                         (html (:div :class "narrow"
-                                                 (:h1 "New group")
-                                                 (when error (htm (:p :class "profile-bad" (hs error))))
-                                                 (:form :method "post" :action "/groups/new"
-                                                   (str (the-object site (field "path" "Group path" :required t :value (param req "path"))))
-                                                   (str (the-object site (field "name" "Name" :value (param req "name"))))
-                                                   (str (the-object site (field "description" "Description" :rows 2)))
-                                                   (str (the-object site (field "visibility" "Visibility" :options '(("public" . "Public") ("internal" . "Internal") ("private" . "Private")) :value "public")))
-                                                   (str (the-object site (button "Create group"))))))))
-                                         :status (if error 400 200))))
+  (require-user)
+  (respond-html req ent
+                (page-html "New group"
+                           (html (:div :class "narrow"
+                                       (:h1 "New group")
+                                       (when error (htm (:p :class "profile-bad" (hs error))))
+                                       (:form :method "post" :action "/groups/new"
+                                              (str (form-field "path" "Group path" :required t :value (param req "path")))
+                                              (str (form-field "name" "Name" :value (param req "name")))
+                                              (str (form-field "description" "Description" :rows 2))
+                                              (str (form-field "visibility" "Visibility" :options '(("public" . "Public") ("internal" . "Internal") ("private" . "Private")) :value "public"))
+                                              (str (form-button "Create group"))))))
+                :status (if error 400 200)))
 
 (defun new-group-post (req ent)
   (let ((user (require-user)))
@@ -316,22 +314,21 @@
 ;;; A user's page, a group's page
 
 (defun user-page (req ent user)
-  (let ((site (site)))
-    (respond-html req ent
-                  (the-object site (page (user-display user)
-                                         (html (:div :class "project-head"
-                                                 (str (the-object site (avatar user)))
-                                                 (:div (:h1 (hs (user-display user)))
-                                                       (:p :class "desc" "@" (hs (getf user :username))
-                                                           (unless (blank? (getf user :bio)) (htm " · " (hs (getf user :bio)))))))
-                                               (:h2 "Projects")
-                                               (str (project-cards (remove-if-not #'can-read-project? (user-projects user)) :empty "No projects."))))))))
+  (respond-html req ent
+                (page-html (user-display user)
+                           (html (:div :class "project-head"
+                                       (str (avatar-html user))
+                                       (:div (:h1 (hs (user-display user)))
+                                             (:p :class "desc" "@" (hs (getf user :username))
+                                                 (unless (blank? (getf user :bio)) (htm " · " (hs (getf user :bio)))))))
+                             (:h2 "Projects")
+                             (str (project-cards (remove-if-not #'can-read-project? (user-projects user)) :empty "No projects."))))))
 
 (defun group-page (req ent group)
   (unless (can-read-group? group) (not-found "No such group."))
-  (let ((site (site)) (level (group-access-level group *current-user*)))
+  (let ((level (group-access-level group *current-user*)))
     (respond-html req ent
-                  (the-object site (page (getf group :name)
+                  (page-html (getf group :name)
                                          (html (:div :class "project-head"
                                                  (:div (:h1 (hs (getf group :name)))
                                                        (:p :class "desc" (hs (getf group :full-path))
@@ -347,44 +344,43 @@
                                                    (htm (:h2 "Subgroups")
                                                         (:ul (dolist (g subs) (htm (:li (:a :href (group-url g) (hs (getf g :full-path))))))))))
                                                (:h2 "Members")
-                                               (str (the-object site (table '("Member" "Role")
-                                                                            (mapcar (lambda (pair) (list (the-object site (user-link (car pair))) (hs (access-name (cdr pair)))))
-                                                                                    (members-with-users group)))))))))))
+                                               (str (html-table '("Member" "Role")
+                                                                            (mapcar (lambda (pair) (list (user-link-html (car pair)) (hs (access-name (cdr pair)))))
+                                                                                    (members-with-users group)))))))))
 
 (defun group-settings-page (req ent group &key notice)
   (unless (>= (or (group-access-level group *current-user*) 0) 40) (forbidden))
-  (let ((site (site)))
-    (respond-html req ent
-                  (the-object site (page (format nil "~a settings" (getf group :name))
-                                         (html (:h1 (hs (getf group :name)) " settings")
-                                               (:div :class "grid"
-                                                 (:div
-                                                   (:form :method "post" :action (format nil "~a/-/settings" (group-url group)) :class "card"
-                                                     (:h2 :class "card-title" "General")
-                                                     (str (the-object site (field "name" "Name" :value (getf group :name))))
-                                                     (str (the-object site (field "description" "Description" :rows 2 :value (getf group :description))))
-                                                     (str (the-object site (field "visibility" "Visibility" :options '(("public" . "Public") ("internal" . "Internal") ("private" . "Private"))
-                                                                                  :value (string-downcase (symbol-name (getf group :visibility))))))
-                                                     (str (the-object site (button "Save"))))
-                                                   (str (members-card site (format nil "~a/-/settings/members" (group-url group)) group)))
-                                                 (:div (str (variables-card site (format nil "~a/-/settings/variables" (group-url group)) group)))))
-                                         :notice (or notice (flash-notice req)))))))
+  (respond-html req ent
+                (page-html (format nil "~a settings" (getf group :name))
+                           (html (:h1 (hs (getf group :name)) " settings")
+                             (:div :class "grid"
+                                   (:div
+                                    (:form :method "post" :action (format nil "~a/-/settings" (group-url group)) :class "card"
+                                           (:h2 :class "card-title" "General")
+                                           (str (form-field "name" "Name" :value (getf group :name)))
+                                           (str (form-field "description" "Description" :rows 2 :value (getf group :description)))
+                                           (str (form-field "visibility" "Visibility" :options '(("public" . "Public") ("internal" . "Internal") ("private" . "Private"))
+                                                                                      :value (string-downcase (symbol-name (getf group :visibility)))))
+                                           (str (form-button "Save")))
+                                    (str (members-card (format nil "~a/-/settings/members" (group-url group)) group)))
+                                   (:div (str (variables-card (format nil "~a/-/settings/variables" (group-url group)) group)))))
+                           :notice (or notice (flash-notice req)))))
 
-(defun members-card (site action record)
+(defun members-card (action record)
   (html (:form :method "post" :action action :class "card"
           (:h2 :class "card-title" "Members")
-          (str (the-object site (table '("Member" "Role" "")
+          (str (html-table '("Member" "Role" "")
                                        (mapcar (lambda (pair)
-                                                 (list (the-object site (user-link (car pair)))
+                                                 (list (user-link-html (car pair))
                                                        (hs (access-name (cdr pair)))
                                                        (html (:button :type "submit" :class "btn btn-small btn-quiet" :name "remove" :value (getf (car pair) :username) "Remove"))))
                                                (members-with-users record))
-                                       :empty "No members of its own.")))
+                                       :empty "No members of its own."))
           (:div :class "actions"
             (:input :type "text" :name "username" :placeholder "username" :required t)
             (:select :name "access"
               (loop for (level . name) in *access-levels* do (htm (:option :value level :selected (and (= level 30) "selected") (hs name)))))
-            (str (the-object site (button "Add" :class "btn btn-small")))))))
+            (str (form-button "Add" :class "btn btn-small"))))))
 
 (defun members-post (req ent record back)
   (let ((remove (param req "remove")) (username (param req "username")))
@@ -395,21 +391,21 @@
                (set-member! record user access)
                (redirect req ent (with-notice back (format nil "~a is a ~a." username (access-name access)))))))))
 
-(defun variables-card (site action record)
+(defun variables-card (action record)
   (html (:form :method "post" :action action :class "card"
           (:h2 :class "card-title" "CI variables")
-          (str (the-object site (table '("Key" "Value" "")
+          (str (html-table '("Key" "Value" "")
                                        (mapcar (lambda (v)
                                                  (list (html (:code (hs (getf v :key))))
                                                        (if (getf v :masked?) "••••••" (html (:code (hs (getf v :value)))))
                                                        (html (:button :type "submit" :class "btn btn-small btn-quiet" :name "remove" :value (getf v :key) "Remove"))))
                                                (getf record :variables))
-                                       :empty "No variables.")))
+                                       :empty "No variables."))
           (:div :class "actions"
             (:input :type "text" :name "key" :placeholder "KEY" :pattern "[A-Za-z_][A-Za-z0-9_]*")
             (:input :type "text" :name "value" :placeholder "value")
             (:label (:input :type "checkbox" :name "masked" :value "1") " masked")
-            (str (the-object site (button "Add" :class "btn btn-small")))))))
+            (str (form-button "Add" :class "btn btn-small"))))))
 
 (defun variables-post (req ent record back)
   (let ((remove (param req "remove")))
@@ -423,51 +419,50 @@
 
 (defun admin-page (req ent &key new-secret)
   (require-admin)
-  (let ((site (site)))
-    (respond-html req ent
-                  (the-object site (page "Admin"
-                                         (html (:h1 "Admin area")
-                                               (:div :class "grid"
-                                                 (:div
-                                                   (str (the-object site (card (the-object site (table '("User" "Email" "Admin" "State" "")
-                                                                                                        (mapcar (lambda (u)
-                                                                                                                  (list (the-object site (user-link u)) (hs (getf u :email))
-                                                                                                                        (if (getf u :admin?) "yes" "")
-                                                                                                                        (hs (status-text (getf u :state)))
-                                                                                                                        (html (:form :method "post" :action (format nil "/admin/users/~d" (getf u :id)) :style "display:inline"
-                                                                                                                                (:button :class "btn btn-small btn-quiet" :name "toggle" :value "admin" "admin")
-                                                                                                                                (:button :class "btn btn-small btn-quiet" :name "toggle" :value "block" (if (eq (getf u :state) :active) "block" "unblock"))))))
-                                                                                                                (records :user))))
-                                                                               :title "Users")))
-                                                   (str (the-object site (card (html (:form :method "post" :action "/admin/users"
-                                                                                       (str (the-object site (field "username" "Username" :required t)))
-                                                                                       (str (the-object site (field "email" "Email" :type "email" :required t)))
-                                                                                       (str (the-object site (field "password" "Password" :type "password" :required t)))
-                                                                                       (str (the-object site (button "Create user")))))
-                                                                               :title "New user"))))
-                                                 (:div
-                                                   (when new-secret
-                                                     (htm (:div :class "card" (:p :class "profile-ok" "The application's secret, shown once:") (:pre (hs new-secret)))))
-                                                   (str (the-object site (card (html (str (the-object site (table '("Name" "Client id" "Redirect URIs")
-                                                                                                                  (mapcar (lambda (app) (list (hs (getf app :name)) (html (:code (hs (getf app :client-id))))
-                                                                                                                                              (hs (format nil "~{~a~^ ~}" (getf app :redirect-uris)))))
-                                                                                                                          (records :oauth-app))
-                                                                                                                  :empty "No applications.")))
-                                                                                     (:form :method "post" :action "/admin/applications"
-                                                                                       (str (the-object site (field "name" "Name" :required t)))
-                                                                                       (str (the-object site (field "redirect_uris" "Redirect URIs (one per line)" :rows 2 :required t)))
-                                                                                       (str (the-object site (field "scopes" "Scopes" :value "api")))
-                                                                                       (str (the-object site (button "Register application")))))
-                                                                               :title "OAuth applications")))
-                                                   (str (the-object site (card (html (:dl :class "kv"
-                                                                                       (:dt "Data") (:dd (:code (hs (namestring *data-directory*))))
-                                                                                       (:dt "Docker") (:dd (hs (if (docker-available?) (or (ignore-errors (docker-version)) "reachable") "not reachable")))
-                                                                                       (:dt "Runner tags") (:dd (hs (format nil "~{~a~^, ~}" *runner-tags*)))
-                                                                                       (:dt "Running jobs") (:dd (hs (princ-to-string (running-count))))
-                                                                                       (:dt "Houses") (:dd (hs (format nil "~{~a~^, ~}" (mapcar (lambda (h) (getf h :name)) *deploy-houses*))))
-                                                                                       (:dt "Lisp") (:dd (hs (format nil "~a ~a" (lisp-implementation-type) (lisp-implementation-version))))))
-                                                                               :title "This forge"))))))
-                                         :notice (flash-notice req))))))
+  (respond-html req ent
+                (page-html "Admin"
+                           (html (:h1 "Admin area")
+                             (:div :class "grid"
+                                   (:div
+                                    (str (card-html (html-table '("User" "Email" "Admin" "State" "")
+                                                                (mapcar (lambda (u)
+                                                                          (list (user-link-html u) (hs (getf u :email))
+                                                                                (if (getf u :admin?) "yes" "")
+                                                                                (hs (status-text (getf u :state)))
+                                                                                (html (:form :method "post" :action (format nil "/admin/users/~d" (getf u :id)) :style "display:inline"
+                                                                                             (:button :class "btn btn-small btn-quiet" :name "toggle" :value "admin" "admin")
+                                                                                             (:button :class "btn btn-small btn-quiet" :name "toggle" :value "block" (if (eq (getf u :state) :active) "block" "unblock"))))))
+                                                                        (records :user)))
+                                                    :title "Users"))
+                                    (str (card-html (html (:form :method "post" :action "/admin/users"
+                                                                 (str (form-field "username" "Username" :required t))
+                                                                 (str (form-field "email" "Email" :type "email" :required t))
+                                                                 (str (form-field "password" "Password" :type "password" :required t))
+                                                                 (str (form-button "Create user"))))
+                                                    :title "New user")))
+                                   (:div
+                                    (when new-secret
+                                      (htm (:div :class "card" (:p :class "profile-ok" "The application's secret, shown once:") (:pre (hs new-secret)))))
+                                    (str (card-html (html (str (html-table '("Name" "Client id" "Redirect URIs")
+                                                                           (mapcar (lambda (app) (list (hs (getf app :name)) (html (:code (hs (getf app :client-id))))
+                                                                                                       (hs (format nil "~{~a~^ ~}" (getf app :redirect-uris)))))
+                                                                                   (records :oauth-app))
+                                                                           :empty "No applications."))
+                                                      (:form :method "post" :action "/admin/applications"
+                                                             (str (form-field "name" "Name" :required t))
+                                                             (str (form-field "redirect_uris" "Redirect URIs (one per line)" :rows 2 :required t))
+                                                             (str (form-field "scopes" "Scopes" :value "api"))
+                                                             (str (form-button "Register application"))))
+                                                    :title "OAuth applications"))
+                                    (str (card-html (html (:dl :class "kv"
+                                                               (:dt "Data") (:dd (:code (hs (namestring *data-directory*))))
+                                                               (:dt "Docker") (:dd (hs (if (docker-available?) (or (ignore-errors (docker-version)) "reachable") "not reachable")))
+                                                               (:dt "Runner tags") (:dd (hs (format nil "~{~a~^, ~}" *runner-tags*)))
+                                                               (:dt "Running jobs") (:dd (hs (princ-to-string (running-count))))
+                                                               (:dt "Houses") (:dd (hs (format nil "~{~a~^, ~}" (mapcar (lambda (h) (getf h :name)) *deploy-houses*))))
+                                                               (:dt "Lisp") (:dd (hs (format nil "~a ~a" (lisp-implementation-type) (lisp-implementation-version))))))
+                                                    :title "This forge")))))
+                           :notice (flash-notice req))))
 
 (defun admin-user-post (req ent id)
   (require-admin)
@@ -495,7 +490,7 @@
 
 (defun help-page (req ent)
   (respond-html req ent
-                (the-object (site) (page "Help"
+                (page-html "Help"
                                          (html (:div :class "narrow prose"
                                                  (:h1 "Help")
                                                  (:h2 "Cloning and pushing")
@@ -514,4 +509,4 @@
                                                  (:h2 "The API")
                                                  (:p "At " (:code "/api/v4") ", in GitLab's shapes: projects, repository trees and files, commits, branches, issues, merge requests, pipelines, jobs and their traces and artifacts. Send a token as " (:code "PRIVATE-TOKEN") ".")
                                                  (:h2 "Deploying")
-                                                 (:p "A project that meets the hosting house's profile (an " (:code "image.sexp") " and a " (:code "monetize.sexp") " at its root) has a Deploy button for its Maintainers, and may deploy itself at the end of a green pipeline.")))))))
+                                                 (:p "A project that meets the hosting house's profile (an " (:code "image.sexp") " and a " (:code "monetize.sexp") " at its root) has a Deploy button for its Maintainers, and may deploy itself at the end of a green pipeline."))))))

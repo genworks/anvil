@@ -108,8 +108,7 @@ a plist of further reply headers."
   (respond req ent "" :status status :cache-control "no-store" :headers (append (list :location location) headers)))
 
 (defun json-table (&rest keys-and-values)
-  "A hash table standing for a JSON object; nil values are left out
-unless the value is :null."
+  "A hash table standing for a JSON object (nil encodes as null)."
   (let ((table (make-hash-table :test #'equal)))
     (loop for (key value) on keys-and-values by #'cddr
           do (setf (gethash key table) value))
@@ -175,11 +174,10 @@ the body."
 
 (defun read-chunked-request-body (req)
   "The body of a chunked request (git sends a push of more than a
-megabyte so) as octets, read from the socket chunk by chunk.
-AllegroServe's own reader goes character by character through an
-unchunking stream that this Lisp's streams cannot read from, and the
-2026-10-08 push of gendl (149 MB) took the image down that way.  The
-body is marked read afterwards, so the server does not look for it again."
+megabyte so) as octets, read from the socket chunk by chunk rather
+than through AllegroServe's unchunking stream, which not every Lisp
+can read from.  The body is marked read, so the server does not look
+for it again."
   (let ((socket (net.aserve:request-socket req))
         (buffer (ingot::make-buffer (* 1024 1024))))
     (labels ((line ()
@@ -274,23 +272,6 @@ API takes them.  Strings; a JSON number or boolean comes as it is."
           ((stringp value) (and (member (string-downcase value) '("true" "1" "yes" "on") :test #'string=) t))
           (t default))))
 
-(defun client-address (req)
-  "Who is asking: the CF-Connecting-IP, else the first X-Forwarded-For
-entry, else the socket's peer."
-  (or (header req :cf-connecting-ip)
-      (let ((forwarded (header req :x-forwarded-for)))
-        (and forwarded (trim (subseq forwarded 0 (or (position #\, forwarded) (length forwarded))))))
-      (ignore-errors (uiop:symbol-call :socket :ipaddr-to-dotted
-                                       (uiop:symbol-call :socket :remote-host (net.aserve:request-socket req))))
-      "unknown"))
-
-(defun request-origin (req)
-  "Scheme and host as the client reached us, from the forwarding
-headers when there are any."
-  (let ((proto (or (header req :x-forwarded-proto) "http"))
-        (host (or (header req :x-forwarded-host) (header req :host) "localhost")))
-    (format nil "~a://~a" proto host)))
-
 ;;; HTML
 
 (defun html-escape (text)
@@ -309,6 +290,11 @@ headers when there are any."
 
 (defun url-decode (text)
   (ignore-errors (net.aserve:uridecode-string text :external-format :utf-8)))
+
+(defun local-path? (text)
+  "Whether TEXT is a path on this site, safe to send a browser back to:
+one slash, not two (//host is another site)."
+  (and (stringp text) (starts-with? "/" text) (not (starts-with? "//" text))))
 
 (defun path-encode (path)
   "A repository path for a URL: every segment encoded, the slashes kept."

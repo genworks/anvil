@@ -15,8 +15,7 @@
 ;;
 
 (defun project-header-html (project view active)
-  (let* ((site (site))
-         (level (project-access-level project))
+  (let* ((level (project-access-level project))
          (latest (latest-pipeline project :ref (getf project :default-branch)))
          (url (project-url project)))
     (html
@@ -26,7 +25,7 @@
                    " " (:span :class "visibility" (hs (string-downcase (symbol-name (getf project :visibility))))))
               (unless (blank? (getf project :description)) (htm (:p :class "desc" (hs (getf project :description))))))
         (:div :class "actions"
-          (when latest (str (the-object site (status-badge (getf latest :status) :href (pipeline-url project latest)))))
+          (when latest (str (status-badge-html (getf latest :status) :href (pipeline-url project latest))))
           (when *current-user*
             (htm (:form :method "post" :action (format nil "~a/-/star" url) :style "display:inline"
                    (:button :class "btn btn-small btn-quiet" :type "submit"
@@ -36,7 +35,7 @@
             (htm (str (mutating-link (format nil "~a/-/deployments" url) "Deploy" :class "btn btn-small"))))
           (when (and level (>= level 40))
             (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/settings" url) "Settings")))))
-      (str (the-object site (tabs (remove nil
+      (str (tabs-html (remove nil
                                           (list (list :code "Code" url)
                                                 (and (getf project :issues-enabled? t)
                                                      (list :issues "Issues" (format nil "~a/-/issues" url) (princ-to-string (length (project-issues project)))))
@@ -48,19 +47,18 @@
                                                 (list :commits "Commits" (format nil "~a/-/commits/~a" url (url-encode (getf project :default-branch))))
                                                 (list :branches "Branches" (format nil "~a/-/branches" url) (princ-to-string (length (the-object view branches))))
                                                 (list :tags "Tags" (format nil "~a/-/tags" url) (princ-to-string (length (the-object view tags))))))
-                                  active))))))
+                                  active)))))
 
 (defun project-page (project title body &key (active :code) notice wide?)
   "A whole page in the project's frame."
   (let ((view (project-view project)))
-    (the-object (site) (page (format nil "~a · ~a" title (getf project :path-with-namespace))
+    (page-html (format nil "~a · ~a" title (getf project :path-with-namespace))
                              body
                              :header (project-header-html project view active)
-                             :notice notice :wide? wide?))))
+                             :notice notice :wide? wide?)))
 
 (defun project-home-page (req ent project)
-  (let* ((site (site))
-         (view (project-view project))
+  (let* ((view (project-view project))
          (url (project-url project)))
     (respond-html req ent
                   (project-page project "Code"
@@ -76,27 +74,27 @@
                                                    (:h2 :class "card-title" (hs (ingot:tree-entry-name (the-object view readme-entry))))
                                                    (:div :class "prose" (str (the-object view readme-html)))))))
                                         (:aside
-                                          (str (the-object site (card (html (:div :class "clone-box"
+                                          (str (card-html (html (:div :class "clone-box"
                                                                               (:input :type "text" :readonly "readonly" :value (project-clone-url project) :onclick "this.select()")
                                                                               (:button :type "button" :class "btn btn-small btn-quiet" :data-copy (project-clone-url project) "copy"))
                                                                             (:p :class "hint" (:a :href (format nil "~a/-/archive/~a/~a-~a.tar.gz" url (url-encode (the-object view default-branch)) (getf project :path) (ref-slug (the-object view default-branch))) "Download tar.gz")
                                                                                 " · " (:a :href (format nil "~a/-/archive/~a/~a-~a.zip" url (url-encode (the-object view default-branch)) (getf project :path) (ref-slug (the-object view default-branch))) "zip")))
-                                                                      :title "Clone")))
-                                          (str (the-object site (card (html (:dl :class "kv"
+                                                                      :title "Clone"))
+                                          (str (card-html (html (:dl :class "kv"
                                                                               (:dt "Commits") (:dd (:a :href (format nil "~a/-/commits/~a" url (url-encode (the-object view default-branch))) (hs (princ-to-string (the-object view commit-count)))))
                                                                               (:dt "Files") (:dd (hs (princ-to-string (the-object view file-count))))
                                                                               (:dt "Default branch") (:dd (:code (hs (the-object view default-branch))))
-                                                                              (:dt "Last commit") (:dd (str (the-object site (time-html (git-time-universal (ingot:commit-committer (the-object view head-commit)))))))
+                                                                              (:dt "Last commit") (:dd (str (time-html (git-time-universal (ingot:commit-committer (the-object view head-commit))))))
                                                                               (when (the-object view ci-file)
                                                                                 (htm (:dt "CI") (:dd (:a :href (format nil "~a/-/blob/~a/~a" url (url-encode (the-object view default-branch)) (the-object view ci-file)) (hs (the-object view ci-file))))))))
-                                                                      :title "About")))
+                                                                      :title "About"))
                                           (when *deploy-houses*
-                                            (str (profile-card site project (the-object view profile))))))))
+                                            (str (profile-card project (the-object view profile))))))))
                                 :notice (flash-notice req)))))
 
-(defun profile-card (site project report)
+(defun profile-card (project report)
   (let ((faults (getf report :faults)) (url (project-url project)))
-    (the-object site (card (html (cond ((null report) (htm (:p :class "quiet" "No commits yet.")))
+    (card-html (html (cond ((null report) (htm (:p :class "quiet" "No commits yet.")))
                                        ((null faults)
                                         (htm (:p :class "profile-ok" "✓ Meets the hosting profile"
                                                  (when (getf report :name) (htm " as " (:code (hs (getf report :name))))))
@@ -105,7 +103,7 @@
                                        (t (htm (:p :class "profile-bad" "✗ Not yet in the hosting profile")
                                                (:ul :class "faults" (dolist (fault faults) (htm (:li (hs fault)))))
                                                (:p :class "hint" "An " (:code "image.sexp") " and a " (:code "monetize.sexp") " at the root; the house's profile says the rest.")))))
-                           :title "Hosting"))))
+                           :title "Hosting")))
 
 (defun empty-repository-html (project)
   (html (:div :class "card"
@@ -149,7 +147,7 @@
   "The table of ENTRIES at PATH in the tree of COMMIT-OID, each with the
 last commit that touched it (the twenty newest commits are walked for
 that, which answers most trees; what they do not reach says nothing)."
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (touches (last-touches repository commit-oid path entries)))
     (html (:div :class "table-wrap"
@@ -171,7 +169,7 @@ that, which answers most trees; what they do not reach says nothing)."
                                      (:submodule (htm (hs name) " @ " (:code (hs (subseq (ingot:tree-entry-oid entry) 0 8)))))
                                      (t (htm (:a :href (format nil "~a/-/blob/~a/~a" url (url-encode ref) (path-encode entry-path)) (hs name))))))
                               (:td :class "msg" (when touch (htm (:a :href (format nil "~a/-/commit/~a" url (ingot:commit-oid touch)) :class "quiet" (hs (ingot:commit-subject touch))))))
-                              (:td :class "when" (when touch (str (the-object site (time-html (git-time-universal (ingot:commit-committer touch)))))))))))))))))
+                              (:td :class "when" (when touch (str (time-html (git-time-universal (ingot:commit-committer touch))))))))))))))))
 
 (defun last-touches (repository commit-oid path entries &key (depth 30))
   "An alist of entry name to the newest commit (among the DEPTH newest)
@@ -202,12 +200,12 @@ that changed it."
 ;;; Branches, tags
 
 (defun branches-page (req ent project)
-  (let* ((site (site)) (view (project-view project)) (url (project-url project))
+  (let* ((view (project-view project)) (url (project-url project))
          (default (getf project :default-branch)))
     (respond-html req ent
                   (project-page project "Branches"
                                 (html (:h2 "Branches")
-                                      (str (the-object site (table '("Branch" "Last commit" "" "")
+                                      (str (html-table '("Branch" "Last commit" "" "")
                                                                    (mapcar (lambda (entry)
                                                                              (destructuring-bind (name oid commit) entry
                                                                                (list (html (:a :href (format nil "~a/-/tree/~a" url (url-encode name)) (:strong (hs name)))
@@ -215,7 +213,7 @@ that changed it."
                                                                                            (when (protected-branch? project name) (htm " " (:span :class "badge" "protected"))))
                                                                                      (if commit
                                                                                          (html (:a :href (format nil "~a/-/commit/~a" url oid) (hs (ingot:commit-subject commit))) " "
-                                                                                               (str (the-object site (time-html (git-time-universal (ingot:commit-committer commit))))))
+                                                                                               (str (time-html (git-time-universal (ingot:commit-committer commit)))))
                                                                                          "")
                                                                                      (if (string= name default) ""
                                                                                          (html (:a :href (format nil "~a/-/compare?from=~a&to=~a" url (url-encode default) (url-encode name)) "compare")
@@ -223,16 +221,16 @@ that changed it."
                                                                                                  (htm " · " (str (mutating-link (format nil "~a/-/merge_requests/new?source=~a" url (url-encode name)) "merge request"))))))
                                                                                      (if (and (not (string= name default)) (can-push-branch? project name))
                                                                                          (html (:form :method "post" :action (format nil "~a/-/branches/~a/delete" url (url-encode name))
-                                                                                                 (str (the-object site (button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete the branch ~a?" name))))))
+                                                                                                 (str (form-button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete the branch ~a?" name)))))
                                                                                          ""))))
                                                                            (the-object view branches))
-                                                                   :empty "No branches.")))
+                                                                   :empty "No branches."))
                                       (when (can? :push project)
                                         (htm (:form :method "post" :action (format nil "~a/-/branches" url) :class "actions"
                                                (:input :type "text" :name "name" :placeholder "new-branch" :required t)
                                                (:span "from")
                                                (:input :type "text" :name "from" :value default)
-                                               (str (the-object site (button "Create branch" :class "btn btn-small")))))))
+                                               (str (form-button "Create branch" :class "btn btn-small"))))))
                                 :active :branches :notice (flash-notice req)))))
 
 (defun branch-create-post (req ent project)
@@ -254,27 +252,27 @@ that changed it."
   (redirect req ent (with-notice (format nil "~a/-/branches" (project-url project)) (format nil "Branch ~a deleted." name))))
 
 (defun tags-page (req ent project)
-  (let* ((site (site)) (view (project-view project)) (url (project-url project)))
+  (let* ((view (project-view project)) (url (project-url project)))
     (respond-html req ent
                   (project-page project "Tags"
                                 (html (:h2 "Tags")
-                                      (str (the-object site (table '("Tag" "Commit" "Download")
+                                      (str (html-table '("Tag" "Commit" "Download")
                                                                    (mapcar (lambda (entry)
                                                                              (destructuring-bind (name oid commit) entry
                                                                                (declare (ignore oid))
                                                                                (list (html (:a :href (format nil "~a/-/tree/~a" url (url-encode name)) (:strong (hs name))))
                                                                                      (if commit (html (:a :href (format nil "~a/-/commit/~a" url (ingot:commit-oid commit)) (hs (ingot:commit-subject commit)))
-                                                                                                      " " (str (the-object site (time-html (git-time-universal (ingot:commit-committer commit)))))) "")
+                                                                                                      " " (str (time-html (git-time-universal (ingot:commit-committer commit))))) "")
                                                                                      (html (:a :href (format nil "~a/-/archive/~a/~a-~a.tar.gz" url (url-encode name) (getf project :path) (ref-slug name)) "tar.gz")
                                                                                            " · " (:a :href (format nil "~a/-/archive/~a/~a-~a.zip" url (url-encode name) (getf project :path) (ref-slug name)) "zip")))))
                                                                            (the-object view tags))
-                                                                   :empty "No tags. Push one: git push origin v1.0"))))
+                                                                   :empty "No tags. Push one: git push origin v1.0")))
                                 :active :tags))))
 
 ;;; Commits
 
 (defun commits-page (req ent project ref path)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (start (or (ingot:resolve-commit repository ref) (not-found "No such ref.")))
          (page (max 1 (or (ignore-errors (parse-integer (url-query-value req "page" "1"))) 1)))
@@ -284,27 +282,27 @@ that changed it."
                   (project-page project "Commits"
                                 (html (str (ref-picker-html project ref "commits" path))
                                       (:h2 "Commits" (when (plusp (length path)) (htm " to " (:code (hs path)))))
-                                      (str (commit-list-html site project commits))
+                                      (str (commit-list-html project commits))
                                       (:div :class "pager"
                                         (when (> page 1) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1- page)) "Newer")))
                                         (when (= (length commits) per) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1+ page)) "Older")))))
                                 :active :commits))))
 
-(defun commit-list-html (site project commits)
+(defun commit-list-html (project commits)
   (let ((url (project-url project)))
-    (the-object site (table '("Commit" "Author" "When")
+    (html-table '("Commit" "Author" "When")
                             (mapcar (lambda (commit)
                                       (list (html (:span :class "title" (:a :href (format nil "~a/-/commit/~a" url (ingot:commit-oid commit)) (hs (ingot:commit-subject commit))))
                                                   " " (:code :class "sha" (hs (subseq (ingot:commit-oid commit) 0 8)))
                                                   (let ((pipeline (latest-pipeline project :sha (ingot:commit-oid commit))))
-                                                    (when pipeline (htm " " (str (the-object site (status-badge (getf pipeline :status) :href (pipeline-url project pipeline))))))))
+                                                    (when pipeline (htm " " (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline)))))))
                                             (hs (ingot:commit-author-name commit))
-                                            (the-object site (time-html (git-time-universal (ingot:commit-committer commit))))))
+                                            (time-html (git-time-universal (ingot:commit-committer commit)))))
                                     commits)
-                            :class "commit-list" :empty "No commits."))))
+                            :class "commit-list" :empty "No commits.")))
 
 (defun commit-page (req ent project sha)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (oid (or (ingot:resolve-commit repository sha) (not-found "No such commit.")))
          (commit (ingot:read-commit repository oid))
@@ -318,10 +316,10 @@ that changed it."
                                         (:dl :class "kv"
                                           (:dt "Commit") (:dd (:code (hs oid)) " · " (:a :href (format nil "~a/-/tree/~a" url oid) "browse the tree"))
                                           (:dt "Author") (:dd (hs (ingot:commit-author-name commit)) " <" (hs (ingot:commit-author-email commit)) "> "
-                                                              (str (the-object site (time-html (git-time-universal (ingot:commit-author commit))))))
+                                                              (str (time-html (git-time-universal (ingot:commit-author commit)))))
                                           (when (ingot:commit-parents commit)
                                             (htm (:dt "Parents") (:dd (dolist (p (ingot:commit-parents commit)) (htm (:a :href (format nil "~a/-/commit/~a" url p) (:code (hs (subseq p 0 8)))) " ")))))
-                                          (when pipeline (htm (:dt "Pipeline") (:dd (str (the-object site (status-badge (getf pipeline :status) :href (pipeline-url project pipeline)))))))))
+                                          (when pipeline (htm (:dt "Pipeline") (:dd (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))))))))
                                       (:h3 (hs (plural (length changes) "file")) " changed")
                                       (str (changes-html repository changes :url url :ref oid)))
                                 :active :commits :wide? t))))
@@ -363,7 +361,7 @@ that changed it."
             (str (string #\Newline))))))
 
 (defun compare-page (req ent project)
-  (let* ((site (site)) (url (project-url project))
+  (let* ((url (project-url project))
          (repository (project-repository project))
          (from-ref (or (url-query-value req "from") (getf project :default-branch)))
          (to-ref (or (url-query-value req "to") (getf project :default-branch)))
@@ -377,12 +375,12 @@ that changed it."
                     (project-page project "Compare"
                                   (html (:form :class "ref-pick" :method "get" :action (format nil "~a/-/compare" url)
                                           (:span "Compare") (:input :type "text" :name "from" :value from-ref) (:span "with") (:input :type "text" :name "to" :value to-ref)
-                                          (str (the-object site (button "Compare" :class "btn btn-small"))))
+                                          (str (form-button "Compare" :class "btn btn-small")))
                                         (when (and (can? :create-merge-request project) commits)
                                           (htm (:p (str (mutating-link (format nil "~a/-/merge_requests/new?source=~a&target=~a" url (url-encode to-ref) (url-encode from-ref)) "Open a merge request"
                                                                        :class "btn btn-small")))))
                                         (:h3 (hs (plural (length commits) "commit")))
-                                        (str (commit-list-html site project commits))
+                                        (str (commit-list-html project commits))
                                         (:h3 (hs (plural (length changes) "file")) " changed")
                                         (str (changes-html repository changes :url url :ref to)))
                                   :active :commits :wide? t)))))

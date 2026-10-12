@@ -9,15 +9,10 @@
 (in-package :anvil)
 
 ;;
-;; The Docker Engine API, spoken over the daemon's Unix socket (or TCP):
+;; The Docker Engine API over the daemon's Unix socket (or TCP), through
 ;; a small HTTP/1.1 client of our own, since the socket is not a host
-;; and port.  What the runner needs: pull an image, create and start a
-;; container, put a tar into it, follow its logs, wait for it, fetch a
-;; tar out of it, remove it; a network for a job's services.
-;;
-;; The only implementation-specific code in Anvil is `docker-connect':
-;; Clozure CL and SBCL open a Unix socket each their own way; another
-;; Lisp, or a DOCKER_HOST of tcp://host:port, goes through usocket.
+;; and port.  `docker-connect' is the one implementation-specific
+;; function in Anvil.
 ;;
 
 (defparameter *docker-api-version* "v1.43")
@@ -121,11 +116,11 @@ to values."
                    while (plusp (length chunk))
                    do (funcall on-chunk chunk))))))
 
-(defun docker-request (method path &key json octets content-type (on-chunk nil) (timeout nil))
+(defun docker-request (method path &key json octets content-type on-chunk headers)
   "Ask the daemon.  Values: the status, the body as octets (unless
 ON-CHUNK took the chunks as they came), the headers.  JSON (a hash
-table) or OCTETS is the body."
-  (declare (ignore timeout))
+table) or OCTETS is the body; HEADERS an alist of further request
+headers."
   (let ((stream (docker-connect))
         (body (cond (json (ingot:string-to-octets (json-string json)))
                     (octets octets)
@@ -136,6 +131,8 @@ table) or OCTETS is the body."
            (write-ascii stream (format nil "Host: docker~c~c" #\Return #\Newline))
            (write-ascii stream (format nil "User-Agent: anvil/~a~c~c" *version* #\Return #\Newline))
            (write-ascii stream (format nil "Connection: close~c~c" #\Return #\Newline))
+           (loop for (name . value) in headers
+                 do (write-ascii stream (format nil "~a: ~a~c~c" name value #\Return #\Newline)))
            (when body
              (write-ascii stream (format nil "Content-Type: ~a~c~c" (or content-type (if json "application/json" "application/x-tar")) #\Return #\Newline))
              (write-ascii stream (format nil "Content-Length: ~d~c~c" (length body) #\Return #\Newline)))
@@ -188,6 +185,7 @@ table) or OCTETS is the body."
     (multiple-value-bind (status)
         (docker-request :post (format nil "/images/create?fromImage=~a&tag=~a" (url-encode name) (url-encode tag))
                         :octets (ingot:make-octets 0) :content-type "text/plain"
+                        :headers (let ((auth (registry-auth-header image))) (and auth (list (cons "X-Registry-Auth" auth))))
                         :on-chunk (lambda (chunk)
                                     (dolist (line (split-on (ingot:octets-to-string chunk) #\Newline))
                                       (let ((json (ignore-errors (parse-json line))))
@@ -199,8 +197,6 @@ table) or OCTETS is the body."
                                               (funcall on-progress text))))))))
       (declare (ignore status))
       (when error-text (docker-error nil "pulling ~a: ~a" image error-text))
-      ;; the registry's auth header is not sent above: a private image
-      ;; needs *registry-credentials* and the header; done when asked
       t)))
 
 (defun docker-create-container (&key image command entrypoint env working-dir labels memory network-mode

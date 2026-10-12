@@ -44,10 +44,8 @@ path, or a fragment."
         (starts-with? "http://" url) (starts-with? "https://" url) (starts-with? "mailto:" url)
         (not (position #\: (subseq url 0 (min (length url) 12)))))))
 
-(defun resolve-relative (url base-url raw-base-url)
-  "URL made absolute within the site when it is relative: against
-BASE-URL (a blob address) for pages, RAW-BASE-URL for images."
-  (declare (ignore raw-base-url))
+(defun resolve-relative (url base-url)
+  "URL made absolute within the site when it is relative to BASE-URL."
   (cond ((or (null base-url) (zerop (length url)) (position #\: url) (char= (char url 0) #\/) (char= (char url 0) #\#)) url)
         (t (let ((clean (if (starts-with? "./" url) (subseq url 2) url)))
              (strcat base-url "/" clean)))))
@@ -87,7 +85,7 @@ dropped; relative links resolved."
                               (when (member attr allowed :test #'string=)
                                 (cond ((member attr '("href" "src") :test #'string=)
                                        (when (safe-url? value)
-                                         (push (cons attr (resolve-relative value (if (string= attr "src") raw-base-url base-url) raw-base-url)) kept)))
+                                         (push (cons attr (resolve-relative value (if (string= attr "src") raw-base-url base-url))) kept)))
                                       ((and (string= name "input") (string= attr "type") (not (string-equal value "checkbox"))))
                                       (t (push (cons attr value) kept))))))
                           (when (string= name "input") (push (cons "disabled" "disabled") kept))

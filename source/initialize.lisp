@@ -242,11 +242,11 @@ plain text for git, JSON for the API and OAuth, else a page."
            (respond-error-json req ent 403 (format nil "403 Forbidden - ~a" *read-only-text*)))
           ((or (starts-with? "/oauth/token" path) (starts-with? "/oauth/revoke" path))
            (respond-json req ent (json-table "error" "access_denied" "error_description" *read-only-text*) :status 403))
-          (t (respond-html req ent (the-object (site) (page "Read-only"
+          (t (respond-html req ent (page-html "Read-only"
                                                             (html (:div :class "narrow"
                                                                     (:h1 "Read-only for now")
                                                                     (:p (hs *read-only-text*) " Browsing works; nothing can be changed here.")
-                                                                    (:p (:a :class "btn" :href "/explore" "Explore"))))))
+                                                                    (:p (:a :class "btn" :href "/explore" "Explore")))))
                            :status 403)))))
 
 ;;; The handler and the server

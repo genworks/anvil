@@ -128,6 +128,11 @@ host through a subprocess.  Off unless the site trusts its projects.")
 (defvar *registry-credentials* nil
   "Alist of (registry . (user . password)) for pulling private images.")
 
+(defvar *push-mirrors?* t
+  "Boolean. Whether a project's push mirrors are pushed to.  Off, a
+forge that must not write to any other (a test instance beside a
+GitLab it imports from) keeps the mirror settings but never pushes.")
+
 ;;; Deployment houses: where Deploy sends a project
 
 (defvar *deploy-houses* nil

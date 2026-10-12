@@ -64,7 +64,7 @@
       ((null *current-user*)
        (redirect req ent (format nil "/users/sign_in?return_to=~a" (url-encode (strcat (request-path req) "?" (or (net.uri:uri-query (net.aserve:request-uri req)) ""))))))
       ((eq (http-method req) :get)
-       (respond-html req ent (the-object (site) (oauth-consent-html app redirect-uri state scope challenge method))))
+       (respond-html req ent (oauth-consent-html app redirect-uri state scope challenge method)))
       ((equal (param req "decision") "deny")
        (redirect req ent (format nil "~a?error=access_denied~@[&state=~a~]" redirect-uri (and state (url-encode state)))))
       (t
@@ -104,8 +104,8 @@
       (cond
         ((not (equal grant-type "authorization_code")) (fail "unsupported_grant_type" "Only authorization_code is offered."))
         ((null app) (fail "invalid_client" "No such application." 401))
-        ((and (getf app :confidential?) secret (not (string= (sha256-hex secret) (getf app :secret-hash))))
-         (fail "invalid_client" "The client secret is wrong." 401))
+        ((and (getf app :confidential?) (not (and secret (string= (sha256-hex secret) (getf app :secret-hash)))))
+         (fail "invalid_client" "The client secret is missing or wrong." 401))
         (t
          (let ((grant (bt:with-lock-held (*oauth-lock*) (prune-oauth-codes!) (prog1 (gethash code *oauth-codes*) (remhash code *oauth-codes*)))))
            (cond
