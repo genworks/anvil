@@ -333,8 +333,28 @@ project's, the pipeline's, the job's own."
         (setf (gethash (car pair) seen) t)
         (push pair out)))))
 
+(defun expand-variable-references (alist)
+  "ALIST with every $NAME and ${NAME} in a value replaced by that
+variable's value from ALIST, as GitLab expands them; a name not in
+ALIST is left for the shell."
+  (flet ((expand (text)
+           (ppcre:regex-replace-all "\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)\\}|([A-Za-z_][A-Za-z0-9_]*))" text
+                                    (lambda (match name1 name2)
+                                      (let ((found (assoc (or name1 name2) alist :test #'string=)))
+                                        (if found (cdr found) match)))
+                                    :simple-calls t)))
+    (loop for (name . value) in alist
+          collect (cons name (if (stringp value) (expand value) value)))))
+
+(defun job-environment (job pipeline project)
+  "The variables a job's container gets: each name once, references
+between them expanded."
+  (expand-variable-references (unique-variables (job-variables job pipeline project))))
+
+(defparameter *builds-root* "/builds")
+
 (defun project-build-dir (project)
-  (format nil "/builds/~a" (getf project :path-with-namespace)))
+  (format nil "~a/~a" *builds-root* (getf project :path-with-namespace)))
 
 (defun shell-quote (text)
   (format nil "'~a'" (ppcre:regex-replace-all "'" text "'\\\\''")))
@@ -374,8 +394,7 @@ part and after_script still runs; the main part's status is the job's."
   (let* ((spec (getf job :spec))
          (image (job-image job))
          (repository (project-repository project))
-         (variables (unique-variables (job-variables job pipeline project)))
-         (env (mapcar (lambda (pair) (format nil "~a=~a" (car pair) (cdr pair))) variables))
+         (env (mapcar (lambda (pair) (format nil "~a=~a" (car pair) (cdr pair))) (job-environment job pipeline project)))
          (project-dir (project-build-dir project))
          (network nil) (services nil) (container nil) (watchdog nil))
     (unwind-protect
@@ -416,10 +435,15 @@ part and after_script still runs; the main part's status is the job's."
            (update-record! job :container container)
            ;; the working tree, and the artifacts of earlier jobs
            (unless (eq (getf spec :git-strategy) :none)
+             ;; the tree goes in under the builds root, its directories and
+             ;; files open to everyone: the tar is root's, and the job runs
+             ;; as the image's user, which must be able to write in it
              (let* ((commit (ingot:read-commit repository (getf pipeline :sha)))
                     (tar (ingot::buffer-octets (ingot:tar-tree repository (ingot:commit-tree commit)
-                                                               :mtime (ingot:commit-committer-time commit)))))
-               (docker-put-archive container project-dir tar)
+                                                               :prefix (subseq (strcat project-dir "/") (length (strcat *builds-root* "/")))
+                                                               :mtime (ingot:commit-committer-time commit)
+                                                               :directory-mode #o777 :file-mode #o666 :executable-mode #o777))))
+               (docker-put-archive container *builds-root* tar)
                (trace-line! job "Checked out ~a (~a) into ~a: ~a"
                             (subseq (getf pipeline :sha) 0 8) (getf pipeline :ref) project-dir
                             (plural (length (ingot:tree-paths repository (ingot:commit-tree commit))) "file")))
@@ -516,7 +540,7 @@ tar whose entries are relative to the project directory."
   (let* ((spec (getf job :spec))
          (repository (project-repository project))
          (root (data-path (format nil "ci/builds/~d/" (getf job :id))))
-         (variables (unique-variables (job-variables job pipeline project))))
+         (variables (job-environment job pipeline project)))
     (ensure-directories-exist root)
     (let* ((commit (ingot:read-commit repository (getf pipeline :sha)))
            (tar (ingot::buffer-octets (ingot:tar-tree repository (ingot:commit-tree commit)))))
