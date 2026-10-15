@@ -58,6 +58,7 @@ set before `initialize!` or `start!`:
 | `*runner-tags*`, `*runner-parallelism*` | What jobs this image's runner takes, and how many at once. |
 | `*deploy-houses*` | The houses a project may be deployed to: `(:key :common-lisp.app :name "..." :lab-url "https://lab.common-lisp.app/prompt-lab" :secret-file #p"..." :domain "common-lisp.app")`. |
 | `*push-mirrors?*` | Whether a project's push mirrors are pushed to; nil for a forge that must write to no other (a test instance beside the GitLab it imports from). |
+| `*pull-mirror-interval*`, `*pull-mirror-token*` | Seconds between rounds of the pull-mirror thread (nil: none), and the read_api token it reads a GitLab's API with (or a file holding it; by default `gitlab-token` in the data directory).  Set from `ANVIL_PULL_MIRROR_SECONDS` by the start-up files. |
 | `*read-only?*` | A forge that only shows; see below.  Set from `ANVIL_READ_ONLY`. |
 | `*robots-txt*` | What `/robots.txt` answers: by default project pages, issues and merge requests yes, the per-commit history, archives and the API no. |
 
@@ -83,8 +84,9 @@ with a title saying the forge is read-only for now.
 and `initialize!` sets it as well whenever the variable is there, so
 a start-up file of your own can't leave such a forge writable.
 Functions called at the REPL still write.  That is how a read-only forge
-gets loaded and kept current: `make-user!`, `import-from-gitlab!` (run
-it again to refresh), `fetch-repository!`.
+gets loaded: `make-user!`, `import-from-gitlab!`.  It is kept current by
+the pull mirrors (below): with `*pull-mirror-interval*` set, a thread
+follows the GitLab it was filled from.
 
 ## Continuous integration
 
@@ -148,7 +150,24 @@ importing user (the first administrator, unless `:importer` names
 another), and its text begins with a line saying who wrote it there
 and when; a user of the same username here is matched instead.
 Importing again brings a repository up to date and adds only the
-issues and merge requests not here yet.  `:into "a-group"` puts single
+issues and merge requests not here yet.
+
+### Pull mirrors
+
+Every imported project is a **pull mirror** of where it came from,
+GitLab's way: `mirror` and `import_url` in its API record, a *Pull
+mirror* card in its settings, `POST /api/v4/projects/:id/mirror/pull`
+to pull now.  `pull-mirror!` fetches the repository (every branch and
+tag, HEAD too) and brings over the issues and merge requests not here
+yet; `pull-mirrors!` does that for every mirrored project and then
+looks at every imported group for projects new there.  With
+`*pull-mirror-interval*` set (the kits set it from
+`ANVIL_PULL_MIRROR_SECONDS`; GitLab's own cadence is 30 minutes) a
+thread runs `pull-mirrors!` on that cadence, so a read-only forge
+filled from a GitLab follows it without anyone at the REPL.  A project
+that was not imported can be given a pull mirror too (its settings, or
+`PUT /projects/:id` with `mirror=true&import_url=...`), with a user and
+token for a repository that is not public.  `:into "a-group"` puts single
 projects under one group here; `:auth '("oauth2" . "<token>")` fetches
 repositories that are not public.
 

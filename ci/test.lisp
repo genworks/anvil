@@ -550,6 +550,18 @@ deploy:
              (and set (plusp received)
                   (search "operator" (ask "/api/v4/projects/imported%2Fsmoke/repository/files/operator.txt/raw?ref=master"))))
          (error (e) (problem "read-only mirror refresh: ~a" e))))
+(check "read-only: pull-mirrors! at the REPL brings an imported project up to date"
+       (handler-case
+           (let* ((project (uiop:symbol-call :anvil :find-project "imported/smoke"))
+                  (repository (uiop:symbol-call :anvil :project-repository (uiop:symbol-call :anvil :find-project "tester/smoke"))))
+             (ingot:make-commit! repository :branch "master" :author (ingot:make-identity "Operator" "operator@example.test") :message "For the mirror"
+                                            :actions (list (list :action :create :path "mirrored.txt" :content (format nil "mirrored~%"))))
+             (and (uiop:symbol-call :anvil :project-pull-mirror project)
+                  (progn (uiop:symbol-call :anvil :pull-mirrors!) t)
+                  (search "mirrored" (ask "/api/v4/projects/imported%2Fsmoke/repository/files/mirrored.txt/raw?ref=master"))
+                  (getf (getf (uiop:symbol-call :anvil :find-project "imported/smoke") :mirror) :last-ok?)
+                  (equal "finished" (jget (json (ask "/api/v4/projects/imported%2Fsmoke")) "import_status"))))
+         (error (e) (problem "pull-mirrors!: ~a" e))))
 (check "read-only: an import at the REPL"
        (let ((reports (ignore-errors (uiop:symbol-call :anvil :import-from-gitlab! *base* :token *token* :projects '("tester/pushed") :into "readonly-import"))))
          (and (equal "readonly-import/pushed" (getf (first reports) :project))
@@ -584,6 +596,17 @@ deploy:
                                                                                   :content "{\"title\":\"After read-only\"}"))
                                                    "iid")))
 (check "off again: a push advertisement" (search "report-status" (ask "/tester/smoke.git/info/refs?service=git-receive-pack" :basic (cons "tester" *token*))))
+
+;; a pull mirror through the API, GitLab's way: mirror and import_url, then mirror/pull
+(let* ((url (format nil "~a/tester/pushed.git" *base*))
+       (json (json (ask "/api/v4/projects/readonly-import%2Fpushed" :method :put :token *token* :content-type "application/json"
+                        :content (format nil "{\"mirror\":true,\"import_url\":\"~a\"}" url)))))
+  (check "a pull mirror set through the API" (equal url (jget json "import_url")))
+  (check "POST mirror/pull answers 200" (eql 200 (nth-value 1 (ask "/api/v4/projects/readonly-import%2Fpushed/mirror/pull" :method :post :token *token*))))
+  (check "mirror=false clears it"
+         (not (equal url (jget (json (ask "/api/v4/projects/readonly-import%2Fpushed" :method :put :token *token* :content-type "application/json"
+                                          :content "{\"mirror\":false}"))
+                              "import_url")))))
 
 ;;; The deployment door, against a house that is not there
 

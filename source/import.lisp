@@ -356,6 +356,11 @@ left out) and a report plist."
       (setq project (update-record! project
                                     :imported-from (list :url (json-get json "web_url") :id gitlab-id :api (getf client :url) :at (get-universal-time))
                                     :created (gitlab-time (json-get json "created_at"))))
+      ;; from now on a pull mirror of where it came from, GitLab's way
+      (unless (consp (getf project :mirror))
+        (setq project (update-record! project :mirror (list :url (json-get json "http_url_to_repo") :api (getf client :url) :gitlab-id gitlab-id
+                                                            :issues? issues? :merge-requests? merge-requests?
+                                                            :user (car auth) :token (cdr auth) :set-at (get-universal-time)))))
       (when repository?
         (handler-case
             (multiple-value-bind (set deleted received) (fetch-repository! project (json-get json "http_url_to_repo") :auth auth)
@@ -390,6 +395,9 @@ per project."
   (let* ((json (or (gitlab-find-group client group-path) (error "No group ~a at ~a." group-path (getf client :url))))
          (group (ensure-import-group! json importer))
          (reports nil))
+    ;; the group remembers which GitLab, for the look at new projects
+    (unless (getf (getf group :imported-from) :api)
+      (setq group (update-record! group :imported-from (append (getf group :imported-from) (list :api (getf client :url))))))
     (dolist (p (gitlab-group-projects client json))
       (when (or (eq projects :all)
                 (member (json-get p "path") projects :test #'string-equal)
@@ -439,3 +447,139 @@ project."
           (declare (ignore project))
           (setq reports (append reports (list report))))))
     reports))
+
+;;; Pull mirrors: a project kept up to date from where it came from --
+;;; GitLab's pull mirroring (mirror and import_url on the project,
+;;; POST mirror/pull).  An imported project is one from its import on;
+;;; a project may also be given one in its settings or through the
+;;; API.  A thread runs every mirror each *pull-mirror-interval*
+;;; seconds and looks at every imported group for projects new there,
+;;; which is how a read-only forge filled from a GitLab follows it.
+
+(defvar *pull-mirror-thread* nil)
+
+(defun pull-mirror-token ()
+  "The token the pull mirrors read a GitLab's API with: *pull-mirror-token*
+itself, the file it names, or the data directory's gitlab-token; nil
+when there is none."
+  (if (stringp *pull-mirror-token*)
+      *pull-mirror-token*
+      (let ((file (if (pathnamep *pull-mirror-token*) *pull-mirror-token* (data-path "gitlab-token"))))
+        (and (probe-file file)
+             (let ((text (string-trim '(#\Space #\Tab #\Newline #\Return) (ingot:octets-to-string (ingot:read-file-octets file)))))
+               (and (plusp (length text)) text))))))
+
+(defun project-pull-mirror (project)
+  "PROJECT's pull mirror, a plist (:url :api :gitlab-id :issues?
+:merge-requests? :user :token :last-at :last-note :last-ok?): its
+:mirror, else one made from where it was imported (a project imported
+before pull mirrors existed), else nil."
+  (let ((mirror (getf project :mirror)))
+    (cond ((eq mirror :off) nil)          ; cleared: an imported project pulls from nowhere either
+          (mirror mirror)
+          (t (let ((from (getf project :imported-from)))
+               (and from (getf from :url)
+                    (list :url (strcat (string-right-trim "/" (getf from :url)) ".git")
+                          :api (getf from :api) :gitlab-id (getf from :id)
+                          :issues? t :merge-requests? t)))))))
+
+(defun set-pull-mirror! (project url &key api gitlab-id (issues? t) (merge-requests? t) user token)
+  "PROJECT pulls from URL (a repository over HTTP) from now on; with
+API (a GitLab's address) and GITLAB-ID, its issues and merge requests
+too.  USER and TOKEN for a repository that is not public.  Answers the
+record."
+  (unless (and (stringp url) (or (starts-with? "https://" url) (starts-with? "http://" url)))
+    (bad-request "A pull mirror is an http(s) address."))
+  (update-record! project :mirror (list :url url :api api :gitlab-id gitlab-id :issues? issues? :merge-requests? merge-requests?
+                                       :user user :token token :set-at (get-universal-time))))
+
+(defun clear-pull-mirror! (project)
+  "PROJECT pulls from nowhere from now on, imported or not (:off keeps
+project-pull-mirror from deriving one from where it was imported)."
+  (update-record! project :mirror :off))
+
+(defun note-pull-mirror! (project note ok?)
+  "What the last pull did, on the mirror."
+  (let* ((current (find-project (getf project :id)))
+         (mirror (and current (project-pull-mirror current))))
+    (when mirror
+      (let ((new (copy-list mirror)))
+        (setf (getf new :last-at) (get-universal-time) (getf new :last-note) note (getf new :last-ok?) ok?)
+        (update-record! current :mirror new)))))
+
+(defun pull-mirror! (project)
+  "Bring PROJECT up to date from its pull mirror: the repository fetched
+(every branch and tag, HEAD too), then, when the source is a GitLab
+project, the issues and merge requests not here yet.  Answers a report
+plist; the outcome is noted on the mirror."
+  (let* ((project (find-project (getf project :id)))
+         (full (getf project :path-with-namespace))
+         (mirror (or (project-pull-mirror project) (error "~a has no pull mirror." full)))
+         (report (list :project full :url (getf mirror :url))))
+    (handler-case
+        (progn
+          (multiple-value-bind (set deleted received)
+              (fetch-repository! project (getf mirror :url)
+                                 :auth (and (getf mirror :user) (getf mirror :token) (cons (getf mirror :user) (getf mirror :token))))
+            (setf (getf report :refs-set) (length set) (getf report :refs-deleted) (length deleted) (getf report :objects) received))
+          (when (and (getf mirror :api) (getf mirror :gitlab-id))
+            (let ((client (make-gitlab-client (getf mirror :api) :token (pull-mirror-token)))
+                  (importer (or (find-record :user (lambda (u) (getf u :admin?))) (error "No importer: make an administrator first."))))
+              (when (and (getf mirror :issues?) (getf project :issues-enabled? t))
+                (setf (getf report :issues) (import-gitlab-issues! client project (getf mirror :gitlab-id) importer)))
+              (when (and (getf mirror :merge-requests?) (getf project :merge-requests-enabled? t))
+                (setf (getf report :merge-requests) (import-gitlab-merge-requests! client project (getf mirror :gitlab-id) importer)))))
+          (note-pull-mirror! project
+                             (format nil "pulled: ~d ref~:p set, ~d object~:p~@[, ~d new issue~:p~]~@[, ~d new merge request~:p~]"
+                                     (getf report :refs-set) (getf report :objects) (getf report :issues) (getf report :merge-requests))
+                             t)
+          (log-line "pull mirror ~a: ~s" full report))
+      (error (e)
+        (log-line "pull mirror ~a: ~a" full e)
+        (setf (getf report :error) (princ-to-string e))
+        (note-pull-mirror! project (princ-to-string e) nil)))
+    report))
+
+(defun group-import-api (group)
+  "The GitLab a group was imported from: on its record, else on one of
+its imported projects' (groups imported before the record carried it)."
+  (or (getf (getf group :imported-from) :api)
+      (some (lambda (p) (and (eq (getf p :namespace-kind) :group) (eql (getf p :namespace-id) (getf group :id))
+                             (getf (getf p :imported-from) :api)))
+            (records :project))))
+
+(defun import-new-group-projects! (group)
+  "The projects of GROUP's GitLab group that are not here yet, imported
+(what is here is left to its pull mirror).  Answers their reports."
+  (let* ((api (or (group-import-api group) (error "~a was not imported from a GitLab." (namespace-path group :group))))
+         (client (make-gitlab-client api :token (pull-mirror-token)))
+         (importer (or (find-record :user (lambda (u) (getf u :admin?))) (error "No importer: make an administrator first.")))
+         (full-path (namespace-path group :group))
+         (json (or (gitlab-find-group client full-path) (error "No group ~a at ~a." full-path api)))
+         (reports nil))
+    (dolist (p (gitlab-group-projects client json))
+      (unless (find-project (format nil "~a/~a" full-path (json-get p "path")))
+        (multiple-value-bind (project report) (import-gitlab-project! client p :namespace group :kind :group :importer importer)
+          (declare (ignore project))
+          (push report reports))))
+    (nreverse reports)))
+
+(defun pull-mirrors! ()
+  "Every project with a pull mirror brought up to date, then every
+imported group looked at for projects new there: one round of the
+pull-mirror thread, callable at the REPL.  Answers the reports."
+  (let ((reports nil))
+    (dolist (project (records :project #'project-pull-mirror))
+      (push (pull-mirror! project) reports))
+    (dolist (group (records :group (lambda (g) (getf g :imported-from))))
+      (handler-case (setq reports (append (reverse (import-new-group-projects! group)) reports))
+        (error (e) (log-line "pull mirrors, group ~a: ~a" (namespace-path group :group) e))))
+    (nreverse reports)))
+
+(defun start-pull-mirror-thread ()
+  "The thread that runs pull-mirrors! every *pull-mirror-interval*
+seconds, when that is set; the first round at once."
+  (when *pull-mirror-interval*
+    (setq *pull-mirror-thread* (loop-thread *pull-mirror-thread* "anvil pull mirrors" *pull-mirror-interval* #'pull-mirrors!))
+    (log-line "pull mirrors every ~d s~@[, API token from ~a~]" *pull-mirror-interval*
+              (and (pull-mirror-token) (if (stringp *pull-mirror-token*) "*pull-mirror-token*" "a token file")))))

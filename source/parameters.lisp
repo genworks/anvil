@@ -133,6 +133,22 @@ host through a subprocess.  Off unless the site trusts its projects.")
 forge that must not write to any other (a test instance beside a
 GitLab it imports from) keeps the mirror settings but never pushes.")
 
+(defvar *pull-mirror-interval* nil
+  "Integer or nil. Seconds between rounds of the pull-mirror thread,
+which brings every project with a pull mirror up to date from the
+repository (and GitLab project) it came from and looks at every
+imported group for projects new there -- GitLab's pull mirroring.
+Nil: no thread; pull-mirrors! at the REPL does one round.  A start-up
+file sets it from ANVIL_PULL_MIRROR_SECONDS; GitLab pulls every 30
+minutes.")
+
+(defvar *pull-mirror-token* nil
+  "The personal access token (read_api) the pull mirrors read their
+GitLab's API with for issues and merge requests (common-lisp.net's bot
+challenge passes no anonymous API call): the token itself, a pathname
+of a file holding it, or nil for the file gitlab-token in the data
+directory when there is one.")
+
 ;;; Deployment houses: where Deploy sends a project
 
 (defvar *deploy-houses* nil

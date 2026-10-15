@@ -406,7 +406,14 @@ last delivery's status kept on the hook.  A push mirror is an address
 with a credential; after a push the forge pushes every branch and tag
 there through Ingot's client side of `receive-pack` (a small
 thing once the server side exists), so a project on Anvil can be
-live-mirrored to GitHub as projects are from GitLab today.
+live-mirrored to GitHub as projects are from GitLab today.  A pull
+mirror is the other direction, GitLab's `mirror` and `import_url`:
+the project is brought up to date from a repository (Ingot's `fetch!`)
+and, when that is a GitLab project, its issues and merge requests not
+here yet come over through the importer.  Every imported project is
+one from its import on; a thread (`*pull-mirror-interval*`) runs every
+mirror each round and looks at every imported group for projects new
+there, which is how a read-only forge filled from a GitLab follows it.
 
 ## What is not here yet
 

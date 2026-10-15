@@ -71,7 +71,30 @@
                                               (:input :type "url" :name "url" :placeholder "https://github.com/org/project.git")
                                               (:input :type "text" :name "user" :placeholder "user")
                                               (:input :type "password" :name "token" :placeholder "token")
-                                              (str (form-button "Add" :class "btn btn-small")))))
+                                              (str (form-button "Add" :class "btn btn-small"))))
+                                          (:form :method "post" :action (format nil "~a/mirror" base) :class "card"
+                                            (:h2 :class "card-title" "Pull mirror")
+                                            (:p :class "hint" "The repository this project is kept up to date from (every branch and tag; for a GitLab project, its issues and merge requests too), "
+                                                (str (if *pull-mirror-interval*
+                                                         (format nil "pulled every ~d minutes." (max 1 (round *pull-mirror-interval* 60)))
+                                                         "pulled only with Pull now on this forge.")))
+                                            (let ((mirror (project-pull-mirror project)))
+                                              (if mirror
+                                                  (htm (:p (:code (hs (getf mirror :url)))
+                                                           (when (getf mirror :api) (htm " · issues and merge requests from " (:code (hs (getf mirror :api))))))
+                                                       (:p :class "quiet" "Last: "
+                                                           (if (getf mirror :last-at)
+                                                               (htm (hs (or (getf mirror :last-note) "")) " " (str (time-html (getf mirror :last-at))))
+                                                               (htm "never")))
+                                                       (:div :class "actions"
+                                                         (:button :type "submit" :class "btn btn-small" :name "pull" :value "1" "Pull now") " "
+                                                         (:button :type "submit" :class "btn btn-small btn-quiet" :name "remove" :value "1" "Remove")))
+                                                  (htm (:p :class "quiet" "None."))))
+                                            (:div :class "actions"
+                                              (:input :type "url" :name "url" :placeholder "https://example.org/group/project.git")
+                                              (:input :type "text" :name "user" :placeholder "user (optional)")
+                                              (:input :type "password" :name "token" :placeholder "token (optional)")
+                                              (str (form-button "Set" :class "btn btn-small")))))
                                         (:div
                                           (str (variables-card (format nil "~a/variables" base) project))
                                           (when *deploy-houses*
@@ -131,6 +154,17 @@
                                                         (list (list :id (next-id :mirror) :url url :user (param req "user") :token (param req "token")
                                                                     :created (get-universal-time)))))
                (redirect req ent (with-notice base "Mirror added; it is pushed after the next push, or with Push now.")))))))
+
+(defun settings-pull-mirror-post (req ent project)
+  (require-can :maintain project)
+  (let ((base (format nil "~a/-/settings" (project-url project))))
+    (cond ((param req "remove") (clear-pull-mirror! project)
+           (redirect req ent (with-notice base "Pull mirror removed.")))
+          ((param req "pull") (enqueue-hook! (let ((project (find-project (getf project :id)))) (lambda () (pull-mirror! project))))
+           (redirect req ent (with-notice base "Pulling in the background; Last will say.")))
+          (t (flet ((given (name) (let ((value (param req name))) (and value (not (blank? value)) value))))
+               (set-pull-mirror! project (param req "url") :user (given "user") :token (given "token")))
+             (redirect req ent (with-notice base "Pull mirror set; Pull now, or wait for the next round."))))))
 
 (defun settings-rename-post (req ent project)
   (require-can :maintain project)

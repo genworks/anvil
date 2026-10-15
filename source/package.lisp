@@ -28,6 +28,13 @@
            #:*docker-socket*
            #:*deploy-houses*
            #:*push-mirrors?*
+           #:*pull-mirror-interval*
+           #:*pull-mirror-token*
+           #:pull-mirrors!
+           #:pull-mirror!
+           #:set-pull-mirror!
+           #:clear-pull-mirror!
+           #:project-pull-mirror
            #:*read-only?*
            #:*read-only-text*
            #:read-only-environment?

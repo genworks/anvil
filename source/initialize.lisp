@@ -203,6 +203,7 @@
                     ((string= (seg 2) "variables") (require-can :maintain project) (variables-post req ent project (format nil "~a/-/settings" (project-url project))))
                     ((string= (seg 2) "hooks") (settings-hooks-post req ent project))
                     ((string= (seg 2) "mirrors") (settings-mirrors-post req ent project))
+                    ((string= (seg 2) "mirror") (settings-pull-mirror-post req ent project))
                     ((string= (seg 2) "rename") (settings-rename-post req ent project))
                     ((string= (seg 2) "delete") (settings-delete-post req ent project))
                     (t (not-found))))
@@ -291,6 +292,7 @@ said; it never makes one writable."
   (fail-orphaned-jobs!)
   (when runner? (start-runner))
   (start-hook-thread)
+  (start-pull-mirror-thread)
   (setq *housekeeping-thread* (loop-thread *housekeeping-thread* "anvil housekeeping" 60 #'housekeeping!))
   (log-line "~a ~a published~@[ for ~{~a~^, ~}~]~:[~;, READ-ONLY~]; data in ~a; docker ~:[not reachable~;reachable~]; runner tags ~{~a~^, ~}"
             *site-name* *version* hosts *read-only?* (namestring *data-directory*) (docker-available?) *runner-tags*)

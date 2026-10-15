@@ -71,6 +71,13 @@
             (gethash "merge_requests_enabled" table) (json-boolean (getf project :merge-requests-enabled? t))
             (gethash "jobs_enabled" table) (json-boolean (getf project :ci-enabled? t))
             (gethash "container_registry_image_prefix" table) ""
+            (gethash "mirror" table) (json-boolean (and (project-pull-mirror project) t))
+            (gethash "import_url" table) (let ((mirror (project-pull-mirror project))) (if mirror (getf mirror :url) :null))
+            (gethash "import_status" table) (let ((mirror (project-pull-mirror project)))
+                                                 (cond ((null mirror) "none") ((null (getf mirror :last-at)) "scheduled")
+                                                       ((getf mirror :last-ok?) "finished") (t "failed")))
+            (gethash "import_error" table) (let ((mirror (project-pull-mirror project)))
+                                                (if (and mirror (getf mirror :last-at) (not (getf mirror :last-ok?))) (getf mirror :last-note) :null))
             (gethash "open_issues_count" table) (length (project-issues project))
             (gethash "permissions" table) (json-table "project_access"
                                                       (let ((level (project-access-level project)))
@@ -366,7 +373,10 @@ path up to a resource word), and the segments after it."
        (case method
          (:get (respond-json req ent (project-json project)))
          (:put (require-can :maintain project)
-          (let ((updated (apply #'update-record! project
+          ;; GitLab's pull mirroring: mirror=true with an import_url sets it, mirror=false clears it
+          (cond ((and (param req "mirror") (not (boolean-param req "mirror"))) (clear-pull-mirror! project))
+                ((param req "import_url") (set-pull-mirror! project (param req "import_url"))))
+          (let ((updated (apply #'update-record! (find-project (getf project :id))
                                 (append (when (param req "description") (list :description (param req "description")))
                                         (when (param req "name") (list :name (param req "name")))
                                         (when (param req "visibility") (list :visibility (intern (string-upcase (param req "visibility")) :keyword)))
@@ -377,6 +387,11 @@ path up to a resource word), and the segments after it."
          (:delete (require-can :admin project) (delete-project! project)
           (respond-json req ent (json-table "message" "202 Accepted") :status 202))
          (t (respond-error-json req ent 405 "405 Method Not Allowed"))))
+      ((and (equal rest '("mirror" "pull")) (eq method :post))
+       (require-can :maintain project)
+       (unless (project-pull-mirror project) (bad-request "~a has no pull mirror." (getf project :path-with-namespace)))
+       (enqueue-hook! (let ((project (find-project (getf project :id)))) (lambda () (pull-mirror! project))))
+       (respond-json req ent (json-table "message" "Pulling.")))
       ((string= (first rest) "repository") (api-repository req ent project (rest rest)))
       ((string= (first rest) "issues") (api-issues req ent project (rest rest)))
       ((string= (first rest) "merge_requests") (api-merge-requests req ent project (rest rest)))
