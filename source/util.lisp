@@ -398,6 +398,10 @@ one slash, not two (//host is another site)."
                               (sleep seconds)))
                       :name name)))
 
+(defvar *log-lock* (bt:make-lock "anvil log"))
+
 (defun log-line (control &rest args)
-  (format *error-output* "~&anvil ~a: ~?~%" (iso-timestamp) control args)
-  (finish-output *error-output*))
+  "One line on the error output, whole: request threads log at once."
+  (bt:with-lock-held (*log-lock*)
+    (format *error-output* "~&anvil ~a: ~?~%" (iso-timestamp) control args)
+    (finish-output *error-output*)))

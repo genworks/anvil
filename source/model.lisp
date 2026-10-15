@@ -209,7 +209,7 @@ repository."
     (when (find-project full) (bad-request "The project ~a exists." full))
     (let ((old-dir (project-repository-path (getf project :path-with-namespace)))
           (new-dir (project-repository-path full)))
-      (ensure-directories-exist new-dir)
+      (ingot:ensure-directory new-dir)
       (rename-file old-dir new-dir))
     (update-record! project :path new-path :path-with-namespace full)))
 
