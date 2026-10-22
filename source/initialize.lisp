@@ -253,6 +253,9 @@ plain text for git, JSON for the API and OAuth, else a page."
 ;;; The handler and the server
 
 (defun anvil-handler (req ent)
+  ;; counting must never cost the request
+  (handler-case (note-request! req)
+    (error (e) (log-line "visits: not counted: ~a" e)))
   (with-request-user (req)
     (with-page-errors (req ent)
       (if (and *read-only?* (read-only-refused? req))
@@ -270,6 +273,8 @@ plain text for git, JSON for the API and OAuth, else a page."
 (defvar *housekeeping-thread* nil)
 
 (defun housekeeping! ()
+  (handler-case (visits-housekeeping!)
+    (error (e) (log-line "visits: ~a" e)))
   (reap-sessions!)
   (reap-artifacts!)
   (refresh-open-deployments!)
@@ -286,6 +291,7 @@ said; it never makes one writable."
   (ensure-directories-exist (data-path "ci/traces/"))
   (ensure-directories-exist (data-path "ci/artifacts/"))
   (load-store!)
+  (load-visits!)
   (setq *site* nil)
   (clrhash *project-views*)
   (publish! :server server :hosts hosts)

@@ -614,6 +614,75 @@ deploy:
        (let ((report (uiop:symbol-call :anvil :profile-report (uiop:symbol-call :anvil :find-project "tester/smoke"))))
          (and (not (getf report :image?)) (getf report :faults))))
 
+;;; Visits: what is counted, and the day's summary posted
+
+(defparameter *browser* "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+
+(defun browse (path &key (agent *browser*) forwarded)
+  "GET PATH as AGENT, from the address FORWARDED says when it is given."
+  (nth-value 1 (ignore-errors
+                (net.aserve.client:do-http-request (format nil "~a~a" *base* path)
+                  :user-agent agent :keep-alive nil :timeout 60
+                  :headers (when forwarded (list (cons "X-Forwarded-For" forwarded)))))))
+
+(defun today-visits () (first (uiop:symbol-call :anvil :visits-summary)))
+
+(let ((before (today-visits)))
+  (browse "/explore" :forwarded "203.0.113.7")
+  (browse "/tester/smoke" :forwarded "203.0.113.7")
+  ;; the proxy's entry is the last one: a first entry the client sent does not make a new visitor
+  (browse "/tester/smoke" :forwarded "198.51.100.99, 203.0.113.7")
+  (browse "/tester/smoke" :forwarded "203.0.113.8")
+  (browse "/tester/smoke" :agent "curl/8.5.0")
+  (browse "/static/anvil.css")
+  (browse "/tester/smoke.git/info/refs?service=git-upload-pack" :agent "git/2.43.0")
+  (browse "/api/v4/version")
+  (let ((after (today-visits)))
+    (flet ((more (key) (- (getf after key) (getf before key))))
+      (check "visits: four page views by a browser" (= 4 (more :views)))
+      (check "visits: two visitors, the forwarded address being the proxy's entry" (= 2 (more :visitors)))
+      (check "visits: the project's views" (>= (or (cdr (assoc "tester/smoke" (getf after :projects) :test #'equal)) 0) 3))
+      (check "visits: a robot apart" (= 1 (more :robots)))
+      (check "visits: a clone" (= 1 (more :fetches)))
+      (check "visits: an API call" (= 1 (more :api))))))
+
+(defvar *posted* nil "The summaries the capture door took: (title . text).")
+
+(net.aserve:publish :path "/ntfy-capture" :server (first (symbol-value (find-symbol "*PUBLISHED-SERVERS*" :anvil)))
+                    :function (lambda (req ent)
+                                (push (cons (net.aserve:header-slot-value req :title)
+                                            (net.aserve:get-request-body req :external-format :utf-8))
+                                      *posted*)
+                                (net.aserve:with-http-response (req ent :content-type "text/plain")
+                                  (net.aserve:with-http-body (req ent) (write-string "ok" net.html.generator:*html-stream*)))))
+
+(setf (symbol-value (find-symbol "*VISITS-NOTIFY-URL*" :anvil)) (format nil "~a/ntfy-capture" *base*))
+(let ((today (getf (today-visits) :date)))
+  ;; a new day: today is finished and its summary waits; housekeeping posts it
+  (bt:with-lock-held ((symbol-value (find-symbol "*VISITS-LOCK*" :anvil)))
+    (uiop:symbol-call :anvil :roll-visits! "2099-01-01"))
+  ;; read the finished days themselves: visits-summary would roll 2099 back to today
+  (check "visits: the finished day kept"
+         (equal today (getf (first (symbol-value (find-symbol "*VISIT-DAYS*" :anvil))) :date)))
+  (let ((reports (symbol-value (find-symbol "*VISIT-REPORTS*" :anvil))))
+    (check "visits: its summary waiting" (equal today (getf (first reports) :date)))
+    (handler-case (uiop:symbol-call :anvil :post-visit-report (first reports))
+      (error (e) (problem "visits: posting: ~a" e))))
+  (let ((post (find-if (lambda (p) (search today (or (car p) ""))) *posted*)))
+    (check "visits: the summary posted with its title" post)
+    (check "visits: the summary's text"
+           (and post (search "page views by" (cdr post)) (search "tester/smoke" (cdr post))
+                (search "Clones and fetches: " (cdr post)))))
+  ;; housekeeping posts what waits (today's, and 2099's as the date rolls back) and clears it
+  (handler-case (uiop:symbol-call :anvil :visits-housekeeping!)
+    (error (e) (problem "visits: housekeeping: ~a" e)))
+  (check "visits: housekeeping posts the waiting summaries and clears them"
+         (and (null (symbol-value (find-symbol "*VISIT-REPORTS*" :anvil)))
+              (find-if (lambda (p) (search "2099-01-01" (or (car p) ""))) *posted*))))
+(check "visits: written to the data directory"
+       (progn (uiop:symbol-call :anvil :save-visits!)
+              (probe-file (merge-pathnames "visits.sexp" *scratch*))))
+
 (ignore-errors (uiop:symbol-call :anvil :stop!))
 (ignore-errors (uiop:delete-directory-tree *scratch* :validate t))
 (finish)

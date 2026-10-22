@@ -149,6 +149,15 @@ challenge passes no anonymous API call): the token itself, a pathname
 of a file holding it, or nil for the file gitlab-token in the data
 directory when there is one.")
 
+;;; Visits: how much the forge is looked at (visits.lisp)
+
+(defvar *visits-notify-url* nil
+  "String or nil. Where each day's summary of the visits is posted, as
+text with a Title header: an ntfy topic's address
+(https://ntfy.sh/<topic>).  Nil: the visits are still counted, and
+anvil:visits-summary shows them, but nothing is posted.  A start-up
+file sets it from ANVIL_VISITS_NOTIFY_URL.")
+
 ;;; Deployment houses: where Deploy sends a project
 
 (defvar *deploy-houses* nil

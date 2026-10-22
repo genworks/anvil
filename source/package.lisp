@@ -30,6 +30,8 @@
            #:*push-mirrors?*
            #:*pull-mirror-interval*
            #:*pull-mirror-token*
+           #:*visits-notify-url*
+           #:visits-summary
            #:pull-mirrors!
            #:pull-mirror!
            #:set-pull-mirror!
