@@ -618,12 +618,16 @@ deploy:
 
 (defparameter *browser* "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 
-(defun browse (path &key (agent *browser*) forwarded)
-  "GET PATH as AGENT, from the address FORWARDED says when it is given."
+(defun browse (path &key (agent *browser*) forwarded (person? t))
+  "GET PATH as AGENT, from the address FORWARDED says when it is given;
+with a browser's navigation headers when PERSON?."
   (nth-value 1 (ignore-errors
                 (net.aserve.client:do-http-request (format nil "~a~a" *base* path)
                   :user-agent agent :keep-alive nil :timeout 60
-                  :headers (when forwarded (list (cons "X-Forwarded-For" forwarded)))))))
+                  :headers (append (when forwarded (list (cons "X-Forwarded-For" forwarded)))
+                                   (when person? (list (cons "Sec-Fetch-Mode" "navigate")
+                                                       (cons "Sec-Fetch-Dest" "document")
+                                                       (cons "Accept-Language" "en-US,en;q=0.9"))))))))
 
 (defun today-visits () (first (uiop:symbol-call :anvil :visits-summary)))
 
@@ -634,6 +638,8 @@ deploy:
   (browse "/tester/smoke" :forwarded "198.51.100.99, 203.0.113.7")
   (browse "/tester/smoke" :forwarded "203.0.113.8")
   (browse "/tester/smoke" :agent "curl/8.5.0")
+  ;; a browser's name without a browser's way of asking: a scraper in disguise
+  (browse "/tester/smoke/-/blob/master/README.md" :forwarded "203.0.113.9" :person? nil)
   (browse "/static/anvil.css")
   (browse "/tester/smoke.git/info/refs?service=git-upload-pack" :agent "git/2.43.0")
   (browse "/api/v4/version")
@@ -643,6 +649,7 @@ deploy:
       (check "visits: two visitors, the forwarded address being the proxy's entry" (= 2 (more :visitors)))
       (check "visits: the project's views" (>= (or (cdr (assoc "tester/smoke" (getf after :projects) :test #'equal)) 0) 3))
       (check "visits: a robot apart" (= 1 (more :robots)))
+      (check "visits: a browser's name without a browser's asking, apart" (= 1 (more :unverified)))
       (check "visits: a clone" (= 1 (more :fetches)))
       (check "visits: an API call" (= 1 (more :api))))))
 
@@ -672,7 +679,8 @@ deploy:
     (check "visits: the summary posted with its title" post)
     (check "visits: the summary's text"
            (and post (search "page views by" (cdr post)) (search "tester/smoke" (cdr post))
-                (search "Clones and fetches: " (cdr post)))))
+                (search "Clones and fetches: " (cdr post))
+                (search "did not look like a person's: " (cdr post)))))
   ;; housekeeping posts what waits (today's, and 2099's as the date rolls back) and clears it
   (handler-case (uiop:symbol-call :anvil :visits-housekeeping!)
     (error (e) (problem "visits: housekeeping: ~a" e)))

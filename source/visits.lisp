@@ -28,7 +28,12 @@
 ;;    (info/refs?service=git-upload-pack), whoever asks;
 ;;  - API calls, whoever makes them;
 ;;  - robots and scripts: page GETs whose browser name says it is not a
-;;    person (the same list common-lisp.net uses), counted apart.
+;;    person (the same list common-lisp.net uses), counted apart;
+;;  - unverified: page GETs that name a browser but do not ask the way a
+;;    browser does when a person opens a page (Sec-Fetch-Mode: navigate,
+;;    or Sec-Fetch-Dest: document, with an Accept-Language): scrapers
+;;    wearing a browser's name, counted apart from the people.  A browser
+;;    old enough to send no Sec-Fetch headers lands here too.
 ;;
 ;; The counts live in data/visits.sexp, written every minute while there
 ;; is anything new: the finished days, and the day in progress with its
@@ -65,7 +70,7 @@ not a namespace, so a view of them names no project.")
 (defstruct (visit-day (:conc-name day-))
   (date nil)
   (salt nil)
-  (views 0) (fetches 0) (api 0) (robots 0)
+  (views 0) (fetches 0) (api 0) (robots 0) (unverified 0)
   (projects (make-hash-table :test #'equal))   ; path -> views
   (seen (make-hash-table :test #'equal)))      ; digest -> t
 
@@ -86,6 +91,7 @@ not a namespace, so a view of them names no project.")
         :fetches (day-fetches day)
         :api (day-api day)
         :robots (day-robots day)
+        :unverified (day-unverified day)
         :projects (let ((pairs (project-views day)))
                     (subseq (sort pairs #'> :key #'cdr) 0 (min 20 (length pairs))))))
 
@@ -130,6 +136,7 @@ for them.  The caller holds the lock."
           :today (and day (list :date (day-date day) :salt (day-salt day)
                                 :views (day-views day) :fetches (day-fetches day)
                                 :api (day-api day) :robots (day-robots day)
+                                :unverified (day-unverified day)
                                 :projects (project-views day)
                                 :seen (seen-digests day))))))
 
@@ -149,7 +156,8 @@ starts the counts afresh."
               (setf (day-views day) (or (getf today :views) 0)
                     (day-fetches day) (or (getf today :fetches) 0)
                     (day-api day) (or (getf today :api) 0)
-                    (day-robots day) (or (getf today :robots) 0))
+                    (day-robots day) (or (getf today :robots) 0)
+                    (day-unverified day) (or (getf today :unverified) 0))
               (dolist (pair (getf today :projects)) (setf (gethash (car pair) (day-projects day)) (cdr pair)))
               (dolist (digest (getf today :seen)) (setf (gethash digest (day-seen day)) t))
               (setq *visit-today* day))))
@@ -193,6 +201,15 @@ forge's own pages."
             (let ((name (second segments)))
               (if (ends-with? ".git" name) (subseq name 0 (- (length name) 4)) name)))))
 
+(defun opened-by-a-person? (req)
+  "Whether REQ asks the way a browser does when a person opens a page: a
+navigation (Sec-Fetch-Mode: navigate, or Sec-Fetch-Dest: document), with
+the languages the person reads (Accept-Language)."
+  (and (or (equalp (header req :sec-fetch-mode) "navigate")
+           (equalp (header req :sec-fetch-dest) "document"))
+       (header req :accept-language)
+       t))
+
 (defun note-request! (req)
   "Count REQ in today's figures, by what it is."
   (let* ((method (http-method req))
@@ -216,6 +233,8 @@ forge's own pages."
             ((let ((agent (header req :user-agent)))
                (or (null agent) (ppcre:scan *visit-robot-agents* agent)))
              (bump (lambda (day) (incf (day-robots day)))))
+            ((not (opened-by-a-person? req))
+             (bump (lambda (day) (incf (day-unverified day)))))
             (t
              (let ((project (viewed-project segments))
                    (agent (header req :user-agent))
@@ -240,7 +259,8 @@ day's plist."
          (when top
            (format out "Most viewed: ~{~a~^, ~}.~%"
                    (mapcar (lambda (pair) (format nil "~a ~:d" (car pair) (cdr pair))) top))))
-       (format out "Robots and scripts, not counted above: ~:d." (getf day :robots))))))
+       (format out "Browser-like requests that did not look like a person's: ~:d.~%" (or (getf day :unverified) 0))
+       (format out "Robots and scripts that said so: ~:d." (getf day :robots))))))
 
 (defun post-visit-report (day)
   "Post DAY's summary to *visits-notify-url*.  True when it was taken."
