@@ -231,6 +231,48 @@ follows.  Answers the updated job record."
                                              (or (null ref) (equal (getf p :ref) ref))
                                              (or (null sha) (equal (getf p :sha) sha)))))))
 
+;;; Commit statuses: what a program outside the forge says about a
+;;; commit (GitLab's POST /statuses/:sha; Cave calls them checks)
+
+(defparameter *commit-status-states* '("pending" "running" "success" "failed" "canceled")
+  "The states a commit status may be set to.")
+
+(defun commit-statuses (project sha &key ref name)
+  "The statuses set on SHA, one per name, the name order."
+  (sort (records :commit-status (lambda (s) (and (eql (getf s :project-id) (getf project :id))
+                                                 (string= (getf s :sha) sha)
+                                                 (or (null ref) (equal (getf s :ref) ref))
+                                                 (or (null name) (equal (getf s :name) name)))))
+        #'string< :key (lambda (s) (getf s :name))))
+
+(defun set-commit-status! (project user sha state &key name ref target-url description coverage)
+  "Set the status NAME of commit SHA to STATE; a second report under the
+same name replaces the first.  Answers the record."
+  (unless (member state *commit-status-states* :test #'equal)
+    (bad-request "state: ~{~a~^, ~}." *commit-status-states*))
+  (let* ((name (if (blank? name) "default" (trim name)))
+         (now (get-universal-time))
+         (fields (list :state state :ref ref :target-url (and (not (blank? target-url)) target-url)
+                       :description (and (not (blank? description)) description)
+                       :coverage coverage :author-id (and user (getf user :id)) :updated now
+                       :started (and (member state '("running" "success" "failed" "canceled") :test #'equal) now)
+                       :finished (and (member state '("success" "failed" "canceled") :test #'equal) now)))
+         (existing (first (commit-statuses project sha :name name))))
+    (if existing
+        (apply #'update-record! existing fields)
+        (save-record! (apply #'new-record :commit-status :project-id (getf project :id) :sha sha :name name fields)))))
+
+(defun commit-statuses-summary (statuses)
+  "One word for STATUSES together, as a pipeline would say it: failed
+when any failed or was canceled, running or pending when any is, success
+when all are, nil when there are none."
+  (let ((states (mapcar (lambda (s) (getf s :state)) statuses)))
+    (cond ((null states) nil)
+          ((intersection states '("failed" "canceled") :test #'equal) "failed")
+          ((member "running" states :test #'equal) "running")
+          ((member "pending" states :test #'equal) "pending")
+          (t "success"))))
+
 (defun status-text (status)
   (string-downcase (symbol-name (or status :created))))
 

@@ -408,3 +408,110 @@ tag before.  Answers the record."
 (defun delete-release! (project release)
   (delete-record! release)
   (touch-project! project))
+
+;;; Release assets: files kept beside the release, and links to elsewhere
+
+(defun release-asset-directory (project release)
+  (data-path (format nil "releases/~d/~a/" (getf project :id) (ref-slug (getf release :tag-name)))))
+
+(defun safe-file-name (name)
+  "NAME's last path part with only letters, digits, dot, dash and
+underscore, not starting with a dot; a bad request when nothing is left."
+  (let* ((base (ingot:last-path-part (substitute #\/ #\\ (or name ""))))
+         (clean (string-left-trim "." (remove-if-not (lambda (c) (or (alphanumericp c) (find c "._-"))) base))))
+    (when (zerop (length clean)) (bad-request "~s is not a file name." name))
+    clean))
+
+(defun add-release-asset! (project release name octets &key content-type)
+  "Keep OCTETS as the file NAME of RELEASE; answers the updated release."
+  (let* ((name (safe-file-name name))
+         (directory (release-asset-directory project release)))
+    (when (find name (getf release :assets) :key (lambda (a) (getf a :name)) :test #'string=)
+      (bad-request "An asset named ~a exists." name))
+    (when (zerop (length octets)) (bad-request "An empty file."))
+    (ingot:ensure-directory directory)
+    (ingot:write-file-octets (merge-pathnames name directory) octets)
+    (update-record! release :assets (append (getf release :assets)
+                                            (list (list :name name :size (length octets)
+                                                        :content-type (if (blank? content-type) (content-type-for name) content-type)
+                                                        :downloads 0 :created (get-universal-time)))))))
+
+(defun release-asset (release name)
+  (find name (getf release :assets) :key (lambda (a) (getf a :name)) :test #'string=))
+
+(defun release-asset-octets (project release asset)
+  "The file's octets, or nil when it is gone from disk."
+  (ingot::file-octets-if-exists (merge-pathnames (getf asset :name) (release-asset-directory project release))))
+
+(defun count-asset-download! (release asset)
+  (update-record! release :assets (mapcar (lambda (a) (if (string= (getf a :name) (getf asset :name))
+                                                          (list* :downloads (1+ (or (getf a :downloads) 0)) a)
+                                                          a))
+                                          (getf release :assets))))
+
+(defun remove-release-asset! (project release name)
+  (let ((file (probe-file (merge-pathnames name (release-asset-directory project release)))))
+    (when file (delete-file file)))
+  (update-record! release :assets (remove name (getf release :assets) :key (lambda (a) (getf a :name)) :test #'string=)))
+
+(defun add-release-link! (release name url &key (link-type "other"))
+  (when (or (blank? name) (blank? url)) (bad-request "A link needs a name and a URL."))
+  (unless (or (starts-with? "https://" url) (starts-with? "http://" url)) (bad-request "A link is http(s)."))
+  (update-record! release :links (append (getf release :links)
+                                         (list (list :id (next-id :release-link) :name (trim name) :url (trim url)
+                                                     :link-type (if (member link-type '("other" "runbook" "image" "package") :test #'equal) link-type "other"))))))
+
+(defun remove-release-link! (release id)
+  (update-record! release :links (remove id (getf release :links) :key (lambda (l) (getf l :id)))))
+
+;;; Milestones: a title with a due date that issues and merge requests
+;;; point at by title
+
+(defun valid-date? (text)
+  (and (stringp text) (= (length text) 10) (char= (char text 4) #\-) (char= (char text 7) #\-)
+       (every (lambda (i) (digit-char-p (char text i))) '(0 1 2 3 5 6 8 9))))
+
+(defun make-milestone! (project title &key description due-date start-date)
+  (when (blank? title) (bad-request "A milestone needs a title."))
+  (when (find-milestone-by-title project title) (bad-request "A milestone ~a exists." (trim title)))
+  (dolist (date (list due-date start-date))
+    (when (and (not (blank? date)) (not (valid-date? date))) (bad-request "A date is YYYY-MM-DD, not ~s." date)))
+  (let ((milestone (save-record! (new-record :milestone :project-id (getf project :id)
+                                                        :iid (project-counter project :milestone)
+                                                        :title (trim title) :description (or description "")
+                                                        :state :active
+                                                        :due-date (and (not (blank? due-date)) due-date)
+                                                        :start-date (and (not (blank? start-date)) start-date)))))
+    (touch-project! project)
+    milestone))
+
+(defun project-milestones (project &key (state :active))
+  "The project's milestones in STATE (:active, :closed or :all), the
+earliest due first, undated last."
+  (sort (records :milestone (lambda (m) (and (eql (getf m :project-id) (getf project :id))
+                                             (or (eq state :all) (eq (getf m :state) state)))))
+        (lambda (a b) (let ((da (or (getf a :due-date) "9999")) (db (or (getf b :due-date) "9999")))
+                        (or (string< da db) (and (string= da db) (< (getf a :iid) (getf b :iid))))))))
+
+(defun find-milestone (project iid)
+  (find-record :milestone (lambda (m) (and (eql (getf m :project-id) (getf project :id)) (eql (getf m :iid) iid)))))
+
+(defun find-milestone-by-title (project title)
+  (and (stringp title)
+       (find-record :milestone (lambda (m) (and (eql (getf m :project-id) (getf project :id)) (string-equal (getf m :title) (trim title)))))))
+
+(defun milestone-things (project milestone)
+  "Two values: the issues and the merge requests of MILESTONE, every state."
+  (flet ((of (things) (remove-if-not (lambda (thing) (equal (getf thing :milestone) (getf milestone :title))) things)))
+    (values (of (project-issues project :state :all)) (of (project-merge-requests project :state :all)))))
+
+(defun set-milestone-state! (project milestone state)
+  (touch-project! project)
+  (update-record! milestone :state state :updated (get-universal-time)))
+
+(defun delete-milestone! (project milestone)
+  "Delete MILESTONE; the things that pointed at it point at nothing."
+  (multiple-value-bind (issues mrs) (milestone-things project milestone)
+    (dolist (thing (append issues mrs)) (update-record! thing :milestone nil)))
+  (delete-record! milestone)
+  (touch-project! project))

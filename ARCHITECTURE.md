@@ -207,7 +207,9 @@ GitLab's names and shapes so that they work unchanged:
 | `GET /projects/:id/hooks`, `POST /projects/:id/hooks` | webhooks |
 | `GET /projects/:id/repository/files/:path/blame?ref=` | blame: runs of lines, each with the commit that wrote them |
 | `GET /projects/:id/languages` | the languages of the default branch, by bytes, as percentages |
-| `GET/POST /projects/:id/releases`, `GET/DELETE /releases/:tag_name` | releases: a tag with a name and notes (the notes written from the commits since the tag before when left blank; `ref` makes the tag when it is new) |
+| `GET/POST /projects/:id/releases`, `GET/DELETE /releases/:tag_name`, `GET/POST /releases/:tag_name/assets/links`, `DELETE .../links/:id`, `POST /releases/:tag_name/assets` (a multipart `file`; Anvil's own) | releases: a tag with a name and notes (the notes written from the commits since the tag before when left blank; `ref` makes the tag when it is new), the files kept beside it and served at `/-/releases/<tag>/downloads/<name>` with their downloads counted, and links elsewhere |
+| `GET/POST /projects/:id/milestones`, `GET/PUT/DELETE /milestones/:id`, `GET /milestones/:id/issues`, `/merge_requests`; `milestone_id` on an issue or merge request | milestones: a title with a due date; `state_event` close or activate |
+| `POST /projects/:id/statuses/:sha` (state, name, ref, target_url, description), `GET /repository/commits/:sha/statuses` | commit statuses: what a program outside the forge says about a commit, one per name, shown as checks on the commit and merge request pages |
 | `GET /projects/:id/search?scope=blobs|commits|issues|merge_requests&search=`, `GET /search?scope=projects|issues|merge_requests&search=` | search, in a project and across the forge |
 
 Authentication: `PRIVATE-TOKEN: <personal access token>`,
@@ -434,7 +436,7 @@ there, which is how a read-only forge filled from a GitLab follows it.
 ## What is not here yet
 
 Git over ssh (keys are kept; no ssh front yet).  Wikis, snippets,
-Pages, release assets beyond the tag's archives, LFS, the container
+Pages, LFS, the container
 registry (the kit builds that push an image into the project's
 registry will need one), subgroups below one level, pipeline
 schedules, parent-child pipelines, `include` from other projects,

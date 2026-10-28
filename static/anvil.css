@@ -148,6 +148,13 @@ time { color: var(--muted); }
 .label.trailer { font-size: .85rem; padding: .1rem .5rem; }
 .release .thing-head h2 { margin: 0; }
 .release .prose { margin-top: .75rem; }
+.release .assets h3 { font-size: .9rem; margin: .75rem 0 .25rem; color: var(--muted); }
+.release .assets ul { margin: 0; padding-left: 1.2rem; }
+.progress { display: inline-block; width: 10rem; height: .5rem; border-radius: 999px; background: var(--band); overflow: hidden; vertical-align: middle; margin-right: .5rem; }
+.progress span { display: block; height: 100%; background: var(--ok); }
+.statuses .badge { margin-right: .2rem; }
+.status-success { background: var(--ok-soft); color: var(--ok); }
+.status-canceled { background: var(--band); color: var(--muted); }
 
 /* commits and diffs */
 .commit-list .sha { font-family: var(--mono); font-size: .85rem; }

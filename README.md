@@ -118,10 +118,10 @@ fetched out.  A job tagged `shell` may run on the image's own host when
 
 `/api/v4/`, in GitLab's names and shapes: projects, groups, members,
 repository trees, blobs, files and their blame, branches, tags, commits
-(reading and making), archives, languages, releases, search, issues and
-notes, merge requests (reading, making, merging), pipelines, jobs,
-traces, artifacts (by job, or the latest of a ref), CI variables,
-webhooks.  See ARCHITECTURE.md for the list.
+(reading and making), archives, languages, releases with their assets
+and links, milestones, commit statuses, search, issues and notes, merge
+requests (reading, making, merging), pipelines, jobs, traces, artifacts
+(by job, or the latest of a ref), CI variables, webhooks.  See ARCHITECTURE.md for the list.
 
 ## Deployment
 

@@ -238,6 +238,60 @@ nil when there is none.  Refuses a body over *max-request-body*."
          (let ((json (ignore-errors (parse-json text))))
            (and (hash-table-p json) json)))))
 
+(defun header-line-value (headers name)
+  "The value of the header NAME (case aside) among the lines HEADERS, or nil."
+  (dolist (line (split-on headers #\Newline))
+    (let ((colon (position #\: line)))
+      (when (and colon (string-equal name (trim (subseq line 0 colon))))
+        (return (string-trim '(#\Space #\Return) (subseq line (1+ colon))))))))
+
+(defun disposition-parameter (disposition name)
+  "The parameter NAME of a Content-Disposition header value: name=\"x\"."
+  (when disposition
+    (let ((at (search (strcat name "=") disposition)))
+      (when at
+        (let* ((start (+ at (length name) 1))
+               (quoted? (and (< start (length disposition)) (char= (char disposition start) #\")))
+               (end (if quoted? (position #\" disposition :start (1+ start)) (or (position #\; disposition :start start) (length disposition)))))
+          (subseq disposition (if quoted? (1+ start) start) (or end (length disposition))))))))
+
+(defun multipart-parts (req)
+  "The parts of a multipart/form-data body: a list of plists (:name
+:filename :content-type :data), the data as octets.  Refuses any other
+body."
+  (let* ((type (or (header req :content-type) ""))
+         (marker (search "boundary=" type)))
+    (unless (and (starts-with? "multipart/form-data" type) marker) (bad-request "A multipart/form-data body."))
+    (let* ((boundary (string-trim "\" " (subseq type (+ marker 9) (position #\; type :start marker))))
+           (delimiter (ingot:string-to-octets (strcat "--" boundary)))
+           (crlfcrlf (ingot:octets 13 10 13 10))
+           (body (or (request-body-octets req) (ingot:make-octets 0)))
+           (parts nil) (at 0))
+      (loop
+        (let ((start (search delimiter body :start2 at)))
+          (unless start (return))
+          (let ((after (+ start (length delimiter))))
+            ;; the last delimiter ends in --
+            (when (and (<= (+ after 2) (length body)) (= (aref body after) 45) (= (aref body (1+ after)) 45)) (return))
+            (let* ((headers-start (+ after 2))
+                   (headers-end (search crlfcrlf body :start2 headers-start)))
+              (unless headers-end (return))
+              (let* ((headers (ingot:octets-to-string (subseq body headers-start headers-end)))
+                     (data-start (+ headers-end 4))
+                     (next (search delimiter body :start2 data-start))
+                     (data-end (max data-start (if next (- next 2) (length body))))   ; the CRLF before the next delimiter
+                     (disposition (header-line-value headers "content-disposition")))
+                (push (list :name (disposition-parameter disposition "name")
+                            :filename (disposition-parameter disposition "filename")
+                            :content-type (header-line-value headers "content-type")
+                            :data (subseq body data-start data-end))
+                      parts)
+                (setq at (or next (length body))))))))
+      (nreverse parts))))
+
+(defun multipart-part (parts name)
+  (find name parts :key (lambda (part) (getf part :name)) :test #'equal))
+
 (defun param (req name &optional default)
   "A parameter from the JSON body, the form or the query, as GitLab's
 API takes them.  Strings; a JSON number or boolean comes as it is."

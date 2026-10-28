@@ -330,6 +330,16 @@ that changed it."
                                     commits)
                             :class "commit-list" :empty "No commits.")))
 
+(defun statuses-html (project statuses)
+  "The commit statuses as a line of badges, each a link to its target."
+  (declare (ignore project))
+  (html (:span :class "statuses"
+          (dolist (status statuses)
+            (htm (:a :class (format nil "badge badge-link status-~a" (getf status :state))
+                     :href (or (getf status :target-url) "#") :title (or (getf status :description) "")
+                     (hs (getf status :name)) " " (hs (getf status :state)))
+                 " ")))))
+
 (defun commit-page (req ent project sha)
   (let* ((url (project-url project))
          (repository (project-repository project))
@@ -338,6 +348,7 @@ that changed it."
          (changes (ingot::commit-diff repository oid))
          (trailers (ingot:commit-trailers commit))
          (signature (ingot:commit-signature repository oid))
+         (statuses (commit-statuses project oid))
          (pipeline (latest-pipeline project :sha oid)))
     (respond-html req ent
                   (project-page project (ingot:commit-subject commit)
@@ -356,7 +367,8 @@ that changed it."
                                           (when trailers
                                             (htm (:dt "Trailers") (:dd (loop for (token . value) in trailers
                                                                            do (htm (:span :class "label trailer" (hs token) ": " (hs value)) " ")))))
-                                          (when pipeline (htm (:dt "Pipeline") (:dd (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))))))))
+                                          (when pipeline (htm (:dt "Pipeline") (:dd (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))))))
+                                          (when statuses (htm (:dt "Checks") (:dd (str (statuses-html project statuses)))))))
                                       (:h3 (hs (plural (length changes) "file")) " changed")
                                       (str (changes-html repository changes :url url :ref oid)))
                                 :active :commits :wide? t))))

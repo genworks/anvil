@@ -20,15 +20,19 @@
          (segment (if issue? "issues" "merge_requests"))
          (state (let ((s (url-query-value req "state"))) (cond ((equal s "closed") :closed) ((equal s "merged") :merged) ((equal s "all") :all) (t :opened))))
          (label (url-query-value req "label"))
-         (things (if issue?
-                     (project-issues project :state state :labels (and label (list label)))
-                     (project-merge-requests project :state state))))
+         (milestone (url-query-value req "milestone"))
+         (things (remove-if-not (lambda (thing) (or (null milestone) (equal (getf thing :milestone) milestone)))
+                                (if issue?
+                                    (project-issues project :state state :labels (and label (list label)))
+                                    (project-merge-requests project :state state)))))
     (respond-html req ent
                   (project-page project (if issue? "Issues" "Merge requests")
                                 (html (:div :class "filters"
                                         (loop for (key name) in (if issue? '((:opened "Open") (:closed "Closed") (:all "All")) '((:opened "Open") (:merged "Merged") (:closed "Closed") (:all "All")))
                                               do (htm (:a :class (if (eq key state) "active" "") :href (format nil "~a/-/~a?state=~(~a~)" url segment key) (hs name))))
                                         (when label (htm (:span :class "label" (hs label)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
+                                        (when milestone (htm (:span :class "badge" "milestone: " (hs milestone)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
+                                        (when issue? (htm (:a :href (format nil "~a/-/milestones" url) "Milestones")))
                                         (when (if issue? (can? :create-issue project) (can? :create-merge-request project))
                                           (htm (str (mutating-link (format nil "~a/-/~a/new" url segment) (if issue? "New issue" "New merge request")
                                                                    :class "btn btn-small" :style "margin-left:auto")))))
@@ -65,6 +69,10 @@
                                           (str (form-field "description" "Description (Markdown)" :rows 10 :value (param req "description")))
                                           (str (form-field "labels" "Labels (comma separated)" :value (param req "labels")
                                                                        :hint (hs (format nil "~{~a~^, ~}" (project-labels project)))))
+                                          (let ((milestones (project-milestones project)))
+                                            (when milestones
+                                              (str (form-field "milestone" "Milestone" :value (param req "milestone")
+                                                                           :options (cons (cons "" "none") (mapcar (lambda (m) (cons (getf m :title) (getf m :title))) milestones))))))
                                           (unless issue?
                                             (str (form-field "remove_source" "Delete the source branch when merged" :type "checkbox" :checked t)))
                                           (str (form-button (if issue? "Open issue" "Open merge request"))))))
@@ -73,13 +81,15 @@
 (defun new-thing-post (req ent project kind)
   (handler-case
       (let* ((labels (remove "" (mapcar #'trim (split-on (or (param req "labels") "") #\,)) :test #'string=))
+             (milestone (let ((m (param req "milestone"))) (and (not (blank? m)) (find-milestone-by-title project m) (trim m))))
              (thing (if (eq kind :issue)
                         (progn (require-can :create-issue project)
-                               (make-issue! project *current-user* (param req "title") :description (param req "description") :labels labels))
+                               (make-issue! project *current-user* (param req "title") :description (param req "description") :labels labels :milestone milestone))
                         (progn (require-can :create-merge-request project)
-                               (make-merge-request! project *current-user* (param req "title") (param req "source") (param req "target")
-                                                    :description (param req "description") :labels labels
-                                                    :remove-source-branch? (boolean-param req "remove_source"))))))
+                               (let ((mr (make-merge-request! project *current-user* (param req "title") (param req "source") (param req "target")
+                                                              :description (param req "description") :labels labels
+                                                              :remove-source-branch? (boolean-param req "remove_source"))))
+                                 (if milestone (update-record! mr :milestone milestone) mr))))))
         (deliver-thing-hooks! project thing *current-user* "open")
         (redirect req ent (thing-url project thing)))
     (http-error (e) (new-thing-page req ent project kind :error (http-error-text e)))))
@@ -126,7 +136,9 @@
                                                                               (:dt "State") (:dd (hs (status-text (getf thing :state))))
                                                                               (:dt "Author") (:dd (str (user-link-html author)))
                                                                               (:dt "Assignee") (:dd (let ((a (record :user (getf thing :assignee-id)))) (if a (str (user-link-html a)) (htm (:span :class "quiet" "nobody")))))
-                                                                              (when (getf thing :milestone) (htm (:dt "Milestone") (:dd (hs (getf thing :milestone)))))
+                                                                              (when (getf thing :milestone)
+                                                                                (htm (:dt "Milestone") (:dd (let ((m (find-milestone-by-title project (getf thing :milestone))))
+                                                                                                            (if m (htm (:a :href (format nil "~a/-/milestones/~d" url (getf m :iid)) (hs (getf thing :milestone)))) (htm (hs (getf thing :milestone))))))))
                                                                               (unless issue?
                                                                                 (htm (:dt "Branches") (:dd (:code (hs (getf thing :source-branch))) " → " (:code (hs (getf thing :target-branch))))))
                                                                               (when (getf thing :merge-commit)
@@ -136,7 +148,11 @@
                                                                                      (str (form-field "title" "Title" :value (getf thing :title)))
                                                                                      (str (form-field "labels" "Labels" :value (format nil "~{~a~^, ~}" (getf thing :labels))))
                                                                                      (str (form-field "assignee" "Assignee (username)" :value (let ((a (record :user (getf thing :assignee-id)))) (and a (getf a :username)))))
-                                                                                     (str (form-field "milestone" "Milestone" :value (getf thing :milestone)))
+                                                                                     (str (form-field "milestone" "Milestone" :value (or (getf thing :milestone) "")
+                                                                                                                  :options (cons (cons "" "none")
+                                                                                                                                 (mapcar (lambda (m) (cons (getf m :title) (getf m :title)))
+                                                                                                                                         (let ((active (project-milestones project)) (current (find-milestone-by-title project (getf thing :milestone))))
+                                                                                                                                           (if (and current (not (member current active))) (cons current active) active))))))
                                                                                      (str (form-button "Update" :class "btn btn-small"))))))
                                                                       :title "Details")))))
                                 :active (if issue? :issues :merge-requests) :notice (flash-notice req)))))
@@ -147,10 +163,12 @@
       (let* ((changes (merge-request-changes project mr))
              (commits (merge-request-commits project mr))
              (status (and source target (eq (getf mr :state) :opened) (ingot:can-merge? repository source target)))
-             (pipeline (and source (latest-pipeline project :sha source))))
+             (pipeline (and source (latest-pipeline project :sha source)))
+             (statuses (and source (commit-statuses project source))))
         (html (:div :class "card"
                 (:h2 :class "card-title" (hs (plural (length commits) "commit")) ", " (hs (plural (length changes) "file")) " changed"
-                     (when pipeline (htm " · pipeline " (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))))))
+                     (when pipeline (htm " · pipeline " (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline)))))
+                     (when statuses (htm " · checks " (str (statuses-html project statuses)))))
                 (cond ((not (eq (getf mr :state) :opened)))
                       ((null source) (htm (:p :class "profile-bad" "The source branch is gone.")))
                       ((null target) (htm (:p :class "profile-bad" "The target branch is gone.")))
@@ -196,3 +214,104 @@
       (progn (merge-merge-request! project mr *current-user* :remove-source? (boolean-param req "remove_source"))
              (redirect req ent (with-notice (thing-url project mr) "Merged.")))
     (http-error (e) (redirect req ent (with-notice (thing-url project mr) (http-error-text e))))))
+
+;;; Milestones
+
+(defun milestone-progress-html (project milestone)
+  "The count of things done and open under MILESTONE, and a bar."
+  (multiple-value-bind (issues mrs) (milestone-things project milestone)
+    (let* ((things (append issues mrs))
+           (done (count-if (lambda (thing) (not (eq (getf thing :state) :opened))) things))
+           (total (length things))
+           (percent (if (zerop total) 0 (round (* 100 done) total))))
+      (html (:div :class "progress" :title (format nil "~d of ~d done" done total)
+              (:span :style (format nil "width:~d%" percent)))
+            (:span :class "quiet" (hs (format nil "~d open · ~d closed · ~d%" (- total done) done percent)))))))
+
+(defun milestones-page (req ent project)
+  (let* ((url (project-url project))
+         (state (let ((s (url-query-value req "state"))) (cond ((equal s "closed") :closed) ((equal s "all") :all) (t :active))))
+         (milestones (project-milestones project :state state)))
+    (respond-html req ent
+                  (project-page project "Milestones"
+                                (html (:div :class "filters"
+                                        (loop for (key name) in '((:active "Open") (:closed "Closed") (:all "All"))
+                                              do (htm (:a :class (if (eq key state) "active" "") :href (format nil "~a/-/milestones?state=~(~a~)" url key) (hs name))))
+                                        (:a :href (format nil "~a/-/issues" url) "Issues")
+                                        (when (can? :update-issue project)
+                                          (htm (str (mutating-link (format nil "~a/-/milestones/new" url) "New milestone" :class "btn btn-small" :style "margin-left:auto")))))
+                                      (str (html-table '("" "Milestone" "Due" "Progress")
+                                                       (mapcar (lambda (m)
+                                                                 (list (status-badge-html (if (eq (getf m :state) :active) :opened :closed))
+                                                                       (html (:span :class "title" (:a :href (format nil "~a/-/milestones/~d" url (getf m :iid)) (hs (getf m :title))))
+                                                                             (unless (blank? (getf m :description)) (htm (:div :class "meta" (hs (subseq (getf m :description) 0 (min 120 (length (getf m :description)))))))))
+                                                                       (hs (or (getf m :due-date) ""))
+                                                                       (milestone-progress-html project m)))
+                                                               milestones)
+                                                       :class "thing-list" :empty "No milestones here.")))
+                                :active :issues :notice (flash-notice req)))))
+
+(defun milestone-page (req ent project milestone)
+  (let ((url (project-url project)) (base (format nil "~a/-/milestones/~d" (project-url project) (getf milestone :iid))))
+    (multiple-value-bind (issues mrs) (milestone-things project milestone)
+      (respond-html req ent
+                    (project-page project (getf milestone :title)
+                                  (html (:div :class "thing-head"
+                                          (str (status-badge-html (if (eq (getf milestone :state) :active) :opened :closed)))
+                                          (:h2 (hs (getf milestone :title)) " " (:span :class "quiet" "%" (hs (princ-to-string (getf milestone :iid)))))
+                                          (when (getf milestone :due-date) (htm (:span :class "quiet" "due " (hs (getf milestone :due-date)))))
+                                          (when (getf milestone :start-date) (htm (:span :class "quiet" "from " (hs (getf milestone :start-date))))))
+                                        (unless (blank? (getf milestone :description))
+                                          (htm (:div :class "card prose" (str (markdown-html (getf milestone :description))))))
+                                        (:div :class "card" (str (milestone-progress-html project milestone)))
+                                        (:div :class "grid"
+                                          (:div (:h3 (hs (plural (length issues) "issue")))
+                                                (:ul :class "thing-list"
+                                                  (dolist (issue issues)
+                                                    (htm (:li (str (status-badge-html (getf issue :state))) " " (:span :class "title" (:a :href (thing-url project issue) (hs (getf issue :title))))))))
+                                                (:h3 (hs (plural (length mrs) "merge request")))
+                                                (:ul :class "thing-list"
+                                                  (dolist (mr mrs)
+                                                    (htm (:li (str (status-badge-html (getf mr :state))) " " (:span :class "title" (:a :href (thing-url project mr) (hs (getf mr :title)))))))))
+                                          (:aside
+                                            (when (can? :update-issue project)
+                                              (str (card-html (html (:form :method "post" :action (format nil "~a/~a" base (if (eq (getf milestone :state) :active) "close" "reopen"))
+                                                                      (str (form-button (if (eq (getf milestone :state) :active) "Close milestone" "Reopen milestone") :class "btn btn-small btn-quiet")))
+                                                                    (:form :method "post" :action (format nil "~a/delete" base) :style "margin-top:.5rem"
+                                                                      (str (form-button "Delete" :class "btn btn-small btn-quiet" :confirm "Delete the milestone? Its issues stay, unassigned.")))
+                                                                    (:p :class "hint" (:a :href (format nil "~a/-/issues?milestone=~a" url (url-encode (getf milestone :title))) "The open issues, as a list")))
+                                                              :title "Actions"))))))
+                                  :active :issues :notice (flash-notice req))))))
+
+(defun new-milestone-page (req ent project &key error)
+  (require-can :update-issue project)
+  (respond-html req ent
+                (project-page project "New milestone"
+                              (html (:div :class "narrow" :style "margin-top:0"
+                                      (:h2 "New milestone")
+                                      (when error (htm (:p :class "profile-bad" (hs error))))
+                                      (:form :method "post" :action (format nil "~a/-/milestones/new" (project-url project))
+                                        (str (form-field "title" "Title" :required t :value (param req "title")))
+                                        (str (form-field "description" "Description (Markdown)" :rows 6 :value (param req "description")))
+                                        (str (form-field "start_date" "Start date" :type "date" :value (param req "start_date")))
+                                        (str (form-field "due_date" "Due date" :type "date" :value (param req "due_date")))
+                                        (str (form-button "Create milestone")))))
+                              :active :issues)))
+
+(defun new-milestone-post (req ent project)
+  (require-can :update-issue project)
+  (handler-case
+      (let ((milestone (make-milestone! project (param req "title") :description (param req "description")
+                                        :due-date (param req "due_date") :start-date (param req "start_date"))))
+        (redirect req ent (with-notice (format nil "~a/-/milestones/~d" (project-url project) (getf milestone :iid)) "Milestone made.")))
+    (http-error (e) (new-milestone-page req ent project :error (http-error-text e)))))
+
+(defun milestone-state-post (req ent project milestone action)
+  (require-can :update-issue project)
+  (set-milestone-state! project milestone (ecase action (:close :closed) (:reopen :active)))
+  (redirect req ent (format nil "~a/-/milestones/~d" (project-url project) (getf milestone :iid))))
+
+(defun milestone-delete-post (req ent project milestone)
+  (require-can :update-issue project)
+  (delete-milestone! project milestone)
+  (redirect req ent (with-notice (format nil "~a/-/milestones" (project-url project)) "Milestone deleted.")))

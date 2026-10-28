@@ -280,7 +280,58 @@ ingot/ inside it, where the pipeline unpacks it.")
     (check "the new release form" (eql 200 (nth-value 1 (ask "/tester/smoke/-/releases/new" :token *token*))))
     (check "the pipeline badge" (let ((svg (ask "/tester/smoke/badges/master/pipeline.svg")))
                                   (and (search "<svg" svg) (search ">pipeline<" svg) (search ">unknown<" svg))))
-    (check "the release badge names the release" (search ">v0.1<" (ask "/tester/smoke/badges/master/release.svg"))))
+    (check "the release badge names the release" (search ">v0.1<" (ask "/tester/smoke/badges/master/release.svg")))
+    ;; assets: a file uploaded, served and counted; a link added
+    (let* ((boundary "----anvilsmoke")
+           (body (format nil "--~a~c~cContent-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"~c~cContent-Type: text/plain~c~c~c~cthe notes~c~c--~a--~c~c"
+                         boundary #\Return #\Newline #\Return #\Newline #\Return #\Newline #\Return #\Newline #\Return #\Newline boundary #\Return #\Newline))
+           (asset (json (ask "/api/v4/projects/1/releases/v0.1/assets" :method :post :token *token*
+                                                                         :content body :content-type (format nil "multipart/form-data; boundary=~a" boundary)))))
+      (check "an asset uploaded" (and (equal "notes.txt" (jget asset "name")) (eql 9 (jget asset "size"))))
+      (check "the asset downloads" (equal "the notes" (ask "/tester/smoke/-/releases/v0.1/downloads/notes.txt")))
+      (check "the download counted, the asset among the release's links"
+             (let* ((links (coerce (jget (jget (json (ask "/api/v4/projects/1/releases/v0.1")) "assets") "links") 'list))
+                    (mine (find "notes.txt" links :key (lambda (l) (jget l "name")) :test #'equal)))
+               (and mine (eql 1 (jget mine "downloads")) (search "/downloads/notes.txt" (jget mine "direct_asset_url")))))
+      (check "a link added" (let ((link (json (ask "/api/v4/projects/1/releases/v0.1/assets/links" :method :post :token *token*
+                                                                                                     :content "name=Docs&url=https://example.org/docs&link_type=runbook" :content-type "application/x-www-form-urlencoded"))))
+                              (and (equal "Docs" (jget link "name")) (equal "runbook" (jget link "link_type")))))
+      (check "the links listed" (= 1 (length (json (ask "/api/v4/projects/1/releases/v0.1/assets/links")))))
+      (check "the release page shows the asset and the link" (let ((page (ask "/tester/smoke/-/releases/v0.1")))
+                                                               (and (search "notes.txt" page) (search "1 download" page) (search "example.org/docs" page))))))
+  ;; milestones, GitLab's shape
+  (let ((milestone (json (ask "/api/v4/projects/1/milestones" :method :post :token *token*
+                                                               :content "title=M1&description=The+first&due_date=2027-01-31" :content-type "application/x-www-form-urlencoded"))))
+    (check "a milestone made" (and (eql 1 (jget milestone "iid")) (equal "active" (jget milestone "state")) (equal "2027-01-31" (jget milestone "due_date"))))
+    (check "a bad date is refused" (eql 400 (nth-value 1 (ask "/api/v4/projects/1/milestones" :method :post :token *token*
+                                                               :content "title=M2&due_date=soon" :content-type "application/x-www-form-urlencoded"))))
+    (check "an issue given the milestone" (equal "M1" (jget (jget (json (ask "/api/v4/projects/1/issues/1" :method :put :token *token*
+                                                                                     :content (format nil "milestone_id=~d" (jget milestone "id")) :content-type "application/x-www-form-urlencoded"))
+                                                                 "milestone") "title")))
+    (check "the milestone's issues" (= 1 (length (json (ask (format nil "/api/v4/projects/1/milestones/~d/issues" (jget milestone "id")))))))
+    (check "the milestones page" (let ((page (ask "/tester/smoke/-/milestones"))) (and (search "M1" page) (search "class=\"progress\"" page))))
+    (check "the milestone page" (search "An issue" (ask "/tester/smoke/-/milestones/1")))
+    (check "the issue page links its milestone" (search "/-/milestones/1" (ask "/tester/smoke/-/issues/1")))
+    (check "the milestone closes" (equal "closed" (jget (json (ask (format nil "/api/v4/projects/1/milestones/~d" (jget milestone "id")) :method :put :token *token*
+                                                                        :content "state_event=close" :content-type "application/x-www-form-urlencoded"))
+                                                        "state")))
+    (check "closed milestones listed apart" (and (= 0 (length (json (ask "/api/v4/projects/1/milestones?state=active"))))
+                                                  (= 1 (length (json (ask "/api/v4/projects/1/milestones?state=closed")))))))
+  ;; commit statuses: what an outside program says about a commit
+  (let ((sha (jget (json (ask "/api/v4/projects/1/repository/commits/master")) "id")))
+    (check "a status set" (let ((status (json (ask (format nil "/api/v4/projects/1/statuses/~a" sha) :method :post :token *token*
+                                                       :content "state=success&name=ci/lint&target_url=https://ci.example.org/1&description=clean" :content-type "application/x-www-form-urlencoded"))))
+                            (and (equal "success" (jget status "status")) (equal "ci/lint" (jget status "name")) (equal sha (jget status "sha")))))
+    (check "a second report under the name replaces the first"
+           (progn (ask (format nil "/api/v4/projects/1/statuses/~a" sha) :method :post :token *token*
+                       :content "state=failed&name=ci/lint" :content-type "application/x-www-form-urlencoded")
+                  (let ((statuses (json (ask (format nil "/api/v4/projects/1/repository/commits/~a/statuses" sha)))))
+                    (and (= 1 (length statuses)) (equal "failed" (jget (aref statuses 0) "status"))))))
+    (check "a bad state is refused" (eql 400 (nth-value 1 (ask (format nil "/api/v4/projects/1/statuses/~a" sha) :method :post :token *token*
+                                                               :content "state=meh" :content-type "application/x-www-form-urlencoded"))))
+    (check "a stranger may not set a status" (eql 403 (nth-value 1 (ask (format nil "/api/v4/projects/1/statuses/~a" sha) :method :post :token *second-token*
+                                                                         :content "state=success" :content-type "application/x-www-form-urlencoded"))))
+    (check "the commit page shows the check" (let ((page (ask (format nil "/tester/smoke/-/commit/~a" sha)))) (and (search "ci/lint" page) (search "Checks" page)))))
   ;; archives
   (check "a tar.gz archive" (let ((octets (ask-octets "/tester/smoke/-/archive/master/smoke-master.tar.gz")))
                               (and (vectorp octets) (> (length octets) 100) (= (aref octets 0) #x1f))))
