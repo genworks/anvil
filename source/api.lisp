@@ -79,6 +79,8 @@
             (gethash "import_error" table) (let ((mirror (project-pull-mirror project)))
                                                 (if (and mirror (getf mirror :last-at) (not (getf mirror :last-ok?))) (getf mirror :last-note) :null))
             (gethash "open_issues_count" table) (length (project-issues project))
+            (gethash "approvals_before_merge" table) (approvals-required project)
+            (gethash "only_allow_merge_if_pipeline_succeeds" table) (json-boolean (getf project :only-merge-if-pipeline-succeeds?))
             (gethash "permissions" table) (json-table "project_access"
                                                       (let ((level (project-access-level project)))
                                                         (if level (json-table "access_level" level) :null))
@@ -173,6 +175,11 @@
                 "detailed_merge_status" (if (string= status "can_be_merged") "mergeable" "conflict")
                 "has_conflicts" (json-boolean (string= status "cannot_be_merged"))
                 "should_remove_source_branch" (json-boolean (getf mr :remove-source-branch?))
+                "draft" (json-boolean (merge-request-draft? mr))
+                "work_in_progress" (json-boolean (merge-request-draft? mr))
+                "approvals_before_merge" (approvals-required project)
+                "blocking_discussions_resolved" 'yason:true
+                "merge_when_pipeline_succeeds" 'yason:false
                 "user_notes_count" (count-if-not (lambda (n) (getf n :system?)) (getf mr :notes))
                 "web_url" (strcat *site-url* (thing-url project mr)))))
 
@@ -382,6 +389,9 @@ path up to a resource word), and the segments after it."
                                 (append (when (param req "description") (list :description (param req "description")))
                                         (when (param req "name") (list :name (param req "name")))
                                         (when (param req "visibility") (list :visibility (intern (string-upcase (param req "visibility")) :keyword)))
+                                        (when (param req "approvals_before_merge") (list :approvals-before-merge (max 0 (or (integer-param req "approvals_before_merge") 0))))
+                                        (when (param req "only_allow_merge_if_pipeline_succeeds")
+                                          (list :only-merge-if-pipeline-succeeds? (boolean-param req "only_allow_merge_if_pipeline_succeeds")))
                                         (when (param req "default_branch")
                                           (ingot:set-default-branch! (project-repository project) (param req "default_branch"))
                                           (list :default-branch (param req "default_branch")))))))
@@ -437,6 +447,7 @@ path up to a resource word), and the segments after it."
       ((string= (first rest) "releases") (api-releases req ent project (rest rest)))
       ((string= (first rest) "search") (api-project-search req ent project))
       ((string= (first rest) "milestones") (api-milestones req ent project (rest rest)))
+      ((string= (first rest) "protected_branches") (api-protected-branches req ent project (rest rest)))
       ((and (string= (first rest) "statuses") (second rest) (eq method :post))
        (require-can :push project)
        (let* ((repository (project-repository project))
@@ -771,6 +782,45 @@ and POST /assets (a multipart file) -- the last is Anvil's own."
               "pipeline_id" :null
               "web_url" (format nil "~a/-/commit/~a" (project-web-url project) (getf status :sha))))
 
+(defun approvals-json (project mr)
+  "GET /merge_requests/:iid/approvals, GitLab's shape."
+  (let ((approvals (current-approvals project mr)))
+    (json-table "id" (getf mr :id) "iid" (getf mr :iid) "project_id" (getf project :id)
+                "title" (getf mr :title) "state" (status-text (getf mr :state))
+                "approvals_required" (approvals-required project)
+                "approvals_left" (approvals-left project mr)
+                "approved" (json-boolean (zerop (approvals-left project mr)))
+                "approved_by" (coerce (mapcar (lambda (a) (json-table "user" (or (user-json (record :user (getf a :user-id))) :null))) approvals) 'vector)
+                "user_has_approved" (json-boolean (and *current-user* (find (getf *current-user* :id) approvals :key (lambda (a) (getf a :user-id)))))
+                "user_can_approve" (json-boolean (and *current-user* (can? :push project))))))
+
+(defun protected-branch-json (project name)
+  (json-table "id" (1+ (or (position name (getf project :protected-branches) :test #'string=) 0)) "name" name
+              "push_access_levels" (vector (json-table "access_level" 40 "access_level_description" "Maintainers"))
+              "merge_access_levels" (vector (json-table "access_level" 40 "access_level_description" "Maintainers"))
+              "allow_force_push" 'yason:false "code_owner_approval_required" 'yason:false))
+
+(defun api-protected-branches (req ent project rest)
+  "GET/POST /protected_branches (name), GET/DELETE /protected_branches/:name."
+  (let ((method (http-method req)))
+    (cond ((and (null rest) (eq method :get))
+           (respond-page req ent (getf project :protected-branches) (lambda (name) (protected-branch-json project name))))
+          ((and (null rest) (eq method :post))
+           (require-can :maintain project)
+           (let ((name (trim (or (param req "name") ""))))
+             (when (blank? name) (bad-request "name."))
+             (when (protected-branch? project name) (http-error 409 "~a is protected already." name))
+             (let ((updated (update-record! project :protected-branches (append (getf project :protected-branches) (list name)))))
+               (respond-json req ent (protected-branch-json updated name) :status 201))))
+          (t (let ((name (url-decode (format nil "~{~a~^/~}" rest))))
+               (cond ((not (protected-branch? project name)) (respond-error-json req ent 404 "404 Not found"))
+                     ((eq method :get) (respond-json req ent (protected-branch-json project name)))
+                     ((eq method :delete) (require-can :maintain project)
+                      (when (string= name (getf project :default-branch)) (bad-request "The default branch stays protected."))
+                      (update-record! project :protected-branches (remove name (getf project :protected-branches) :test #'string=))
+                      (respond req ent "" :status 204))
+                     (t (respond-error-json req ent 405 "405 Method Not Allowed"))))))))
+
 (defun blob-hit-json (project ref hit)
   (json-table "basename" (let ((name (ingot:last-path-part (getf hit :path))))
                            (let ((dot (position #\. name :from-end t))) (if dot (subseq name 0 dot) name)))
@@ -942,6 +992,14 @@ execute_filemode}], as GitLab takes them."
                                                         :message (param req "merge_commit_message")
                                                         :remove-source? (boolean-param req "should_remove_source_branch"))))
                       (respond-json req ent (merge-request-json project merged))))
+                   ((string= (second rest) "approvals")
+                    (respond-json req ent (approvals-json project mr)))
+                   ((string= (second rest) "approve")
+                    (require-can :push project)
+                    (respond-json req ent (approvals-json project (approve-merge-request! project mr *current-user* :sha (param req "sha"))) :status 201))
+                   ((string= (second rest) "unapprove")
+                    (require-can :push project)
+                    (respond-json req ent (approvals-json project (unapprove-merge-request! project mr *current-user*)) :status 201))
                    ((string= (second rest) "changes")
                     (let ((table (merge-request-json project mr)))
                       (setf (gethash "changes" table) (coerce (mapcar (lambda (c) (change-json (project-repository project) c)) (merge-request-changes project mr)) 'vector))
@@ -974,6 +1032,8 @@ execute_filemode}], as GitLab takes them."
   "Merge MR; answers the updated record.  Signals http-error 406 on a
 conflict, as GitLab does."
   (unless (eq (getf mr :state) :opened) (http-error 405 "The merge request is not open."))
+  (let ((blockers (merge-blockers project mr)))
+    (when blockers (http-error 405 "~{~a~^ ~}" blockers)))
   (let ((repository (project-repository project)))
     (unless (can-push-branch? project (getf mr :target-branch) user) (forbidden "You may not merge into this branch."))
     (handler-case

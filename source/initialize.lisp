@@ -212,6 +212,8 @@
                                  ((string= (seg 3) "reopen") (thing-state-post req ent project thing :reopen))
                                  ((string= (seg 3) "edit") (thing-edit-post req ent project thing))
                                  ((and (string= (seg 3) "merge") (eq kind :merge-request)) (merge-post req ent project thing))
+                                 ((and (string= (seg 3) "approve") (eq kind :merge-request)) (approval-post req ent project thing :approve))
+                                 ((and (string= (seg 3) "unapprove") (eq kind :merge-request)) (approval-post req ent project thing :unapprove))
                                  (t (not-found))))))))
              ((string= what "pipelines")
               (cond ((null (seg 2)) (if (post?) (pipeline-run-post req ent project) (pipelines-page req ent project)))

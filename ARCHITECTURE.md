@@ -201,7 +201,8 @@ GitLab's names and shapes so that they work unchanged:
 | `GET /projects/:id/members/all` | who may do what |
 | `GET /projects/:id/repository/tree?ref=&path=&recursive=&per_page=&page=` (with `X-Next-Page`), `GET /repository/blobs/:sha/raw`, `GET /repository/files/:path/raw?ref=`, `GET /repository/branches[/:name]`, `GET /repository/tags`, `GET /repository/commits?ref_name=`, `GET /repository/commits/:sha`, `POST /repository/commits` (branch, start_branch, commit_message, actions), `GET /repository/archive[.tar.gz|.zip]?sha=` | the repository |
 | `GET/POST /projects/:id/issues`, `GET/PUT /issues/:iid`, `GET/POST /issues/:iid/notes` | issues |
-| `GET/POST /projects/:id/merge_requests?state=&source_branch=`, `GET/PUT /merge_requests/:iid`, `PUT /merge_requests/:iid/merge` | merge requests |
+| `GET/POST /projects/:id/merge_requests?state=&source_branch=`, `GET/PUT /merge_requests/:iid`, `PUT /merge_requests/:iid/merge`, `GET /merge_requests/:iid/approvals`, `POST /approve`, `POST /unapprove` | merge requests; a draft (`Draft:` in the title) does not merge, nor one short of the project's `approvals_before_merge` (a push to the source asks again), nor, with `only_allow_merge_if_pipeline_succeeds`, one whose head's pipeline or checks have not succeeded |
+| `GET/POST /projects/:id/protected_branches`, `GET/DELETE /protected_branches/:name` | the branches Maintainers alone push to |
 | `GET /projects/:id/pipelines?per_page=`, `POST /projects/:id/pipeline?ref=`, `GET /pipelines/:id`, `GET /pipelines/:id/jobs`, `GET /jobs/:id`, `GET /jobs/:id/trace`, `POST /jobs/:id/retry`, `GET /jobs/:id/artifacts`, `GET /jobs/artifacts/:ref/download?job=`, `GET /jobs/artifacts/:ref/raw/:path?job=` | CI |
 | `GET/POST /projects/:id/variables` | CI variables (values shown to Maintainers only) |
 | `GET /projects/:id/hooks`, `POST /projects/:id/hooks` | webhooks |

@@ -105,6 +105,7 @@
                   (project-page project (getf thing :title)
                                 (html (:div :class "thing-head"
                                         (str (status-badge-html (getf thing :state)))
+                                        (when (and (not issue?) (merge-request-draft? thing)) (htm (:span :class "badge" "draft")))
                                         (:h2 (hs (getf thing :title)) " " (:span :class "quiet" (if issue? "#" "!") (hs (princ-to-string (getf thing :iid)))))
                                         (:span :class "quiet" "opened " (str (time-html (getf thing :created))) " by " (str (user-link-html author)))
                                         (dolist (l (getf thing :labels)) (htm (:a :class "label" :href (format nil "~a/-/~a?label=~a" url segment (url-encode l)) (hs l)))))
@@ -162,18 +163,33 @@
     (multiple-value-bind (repository source target) (merge-request-base project mr)
       (let* ((changes (merge-request-changes project mr))
              (commits (merge-request-commits project mr))
-             (status (and source target (eq (getf mr :state) :opened) (ingot:can-merge? repository source target)))
+             (open? (eq (getf mr :state) :opened))
+             (status (and source target open? (ingot:can-merge? repository source target)))
              (pipeline (and source (latest-pipeline project :sha source)))
-             (statuses (and source (commit-statuses project source))))
+             (statuses (and source (commit-statuses project source)))
+             (approvals (current-approvals project mr))
+             (required (approvals-required project))
+             (blockers (and open? (merge-blockers project mr)))
+             (mine? (and *current-user* (find (getf *current-user* :id) approvals :key (lambda (a) (getf a :user-id))))))
         (html (:div :class "card"
                 (:h2 :class "card-title" (hs (plural (length commits) "commit")) ", " (hs (plural (length changes) "file")) " changed"
                      (when pipeline (htm " · pipeline " (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline)))))
                      (when statuses (htm " · checks " (str (statuses-html project statuses)))))
-                (cond ((not (eq (getf mr :state) :opened)))
+                (when (and open? (or (plusp required) approvals (can? :push project)))
+                  (htm (:p :class "approvals"
+                         (cond ((and (plusp required) (zerop (approvals-left project mr))) (htm (:span :class "badge status-success" "approved")))
+                               ((plusp required) (htm (:span :class "badge" (hs (format nil "~d of ~d approvals" (length approvals) required)))))
+                               (approvals (htm (:span :class "badge status-success" "approved"))))
+                         (dolist (a approvals) (let ((who (record :user (getf a :user-id)))) (when who (htm " " (str (user-link-html who))))))
+                         (when (can? :push project)
+                           (htm (:form :method "post" :action (format nil "~a/~a" base (if mine? "unapprove" "approve")) :style "display:inline;margin-left:.5rem"
+                                  (str (form-button (if mine? "Revoke approval" "Approve") :class "btn btn-small btn-quiet"))))))))
+                (cond ((not open?))
                       ((null source) (htm (:p :class "profile-bad" "The source branch is gone.")))
                       ((null target) (htm (:p :class "profile-bad" "The target branch is gone.")))
                       ((eq status :already) (htm (:p :class "quiet" "Everything in the source is in the target already.")))
                       ((eq status :conflict) (htm (:p :class "profile-bad" "Cannot be merged automatically: the branches conflict. Merge the target into the source locally and push.")))
+                      (blockers (htm (:ul :class "faults" (dolist (b blockers) (htm (:li (hs b)))))))
                       ((can? :merge project)
                        (htm (:form :method "post" :action (format nil "~a/merge" base) :class "actions"
                               (str (form-button (if (eq status :fast-forward) "Merge (fast-forward)" "Merge") :confirm "Merge this request?"))
@@ -183,6 +199,15 @@
                   (htm (:details (:summary "Commits") (str (commit-list-html project commits)))))
                 (when changes
                   (htm (:details :open "open" (:summary "Changes") (str (changes-html repository changes :url url :ref source)))))))))))
+
+(defun approval-post (req ent project mr action)
+  (require-can :push project)
+  (handler-case
+      (progn (ecase action
+               (:approve (approve-merge-request! project mr *current-user*))
+               (:unapprove (unapprove-merge-request! project mr *current-user*)))
+             (redirect req ent (thing-url project mr)))
+    (http-error (e) (redirect req ent (with-notice (thing-url project mr) (http-error-text e))))))
 
 (defun note-post (req ent project thing)
   (require-can :create-note project)

@@ -32,6 +32,10 @@
                                                                          :value (getf project :default-branch)))
                                             (str (form-field "protected" "Protected branches (one per line)" :rows 2 :value (format nil "~{~a~%~}" (getf project :protected-branches))
                                                                          :hint "Maintainers alone push to these, and only fast-forwards; merge requests merge into them."))
+                                            (str (form-field "approvals" "Approvals required to merge" :type "number" :value (princ-to-string (approvals-required project))
+                                                             :hint "Developers approve a merge request as its source stands; a push to the source asks again."))
+                                            (:div :class "field"
+                                              (:label (:input :type "checkbox" :name "pipeline_gate" :value "1" :checked (and (getf project :only-merge-if-pipeline-succeeds?) "checked")) " Merge only when the pipeline and the checks succeed"))
                                             (:div :class "field"
                                               (:label (:input :type "checkbox" :name "issues" :value "1" :checked (and (getf project :issues-enabled? t) "checked")) " Issues")
                                               (:label (:input :type "checkbox" :name "merge_requests" :value "1" :checked (and (getf project :merge-requests-enabled? t) "checked")) " Merge requests")
@@ -125,7 +129,9 @@
                     :protected-branches (remove-duplicates (remove "" (mapcar #'trim (split-on (or (param req "protected") "") #\Newline)) :test #'string=) :test #'string=)
                     :issues-enabled? (boolean-param req "issues")
                     :merge-requests-enabled? (boolean-param req "merge_requests")
-                    :ci-enabled? (boolean-param req "ci"))
+                    :ci-enabled? (boolean-param req "ci")
+                    :approvals-before-merge (max 0 (or (integer-param req "approvals") 0))
+                    :only-merge-if-pipeline-succeeds? (boolean-param req "pipeline_gate"))
     (project-changed! project)
     (redirect req ent (with-notice base "Saved."))))
 

@@ -515,3 +515,63 @@ earliest due first, undated last."
     (dolist (thing (append issues mrs)) (update-record! thing :milestone nil)))
   (delete-record! milestone)
   (touch-project! project))
+
+;;; Merge requests: drafts, approvals, and what stands between one and
+;;; its merge
+
+(defun draft-title? (title)
+  "Whether TITLE marks a draft, as GitLab reads it: Draft: or WIP: in
+front, or [Draft]."
+  (let ((t2 (string-downcase (trim title))))
+    (or (starts-with? "draft:" t2) (starts-with? "wip:" t2) (starts-with? "[draft]" t2) (starts-with? "(draft)" t2))))
+
+(defun merge-request-draft? (mr) (draft-title? (getf mr :title)))
+
+(defun approvals-required (project)
+  (or (getf project :approvals-before-merge) 0))
+
+(defun merge-request-head (project mr)
+  (ingot:resolve-commit (project-repository project) (getf mr :source-branch)))
+
+(defun current-approvals (project mr)
+  "The approvals given to the source branch as it is now; a push resets them."
+  (let ((head (merge-request-head project mr)))
+    (remove-if-not (lambda (a) (equal (getf a :sha) head)) (getf mr :approvals))))
+
+(defun approvals-left (project mr)
+  (max 0 (- (approvals-required project) (length (current-approvals project mr)))))
+
+(defun approve-merge-request! (project mr user &key sha)
+  "USER approves MR as its source stands; SHA, when given, must be that head."
+  (let ((head (merge-request-head project mr)))
+    (unless head (bad-request "The source branch is gone."))
+    (when (and sha (not (string= sha head))) (http-error 409 "The source branch has moved to ~a." head))
+    (if (find (getf user :id) (current-approvals project mr) :key (lambda (a) (getf a :user-id)))
+        mr
+        (add-note! (update-record! mr :approvals (append (remove (getf user :id) (getf mr :approvals) :key (lambda (a) (getf a :user-id)))
+                                                         (list (list :user-id (getf user :id) :sha head :at (get-universal-time)))))
+                   user "approved" :system? t))))
+
+(defun unapprove-merge-request! (project mr user)
+  (declare (ignore project))
+  (if (find (getf user :id) (getf mr :approvals) :key (lambda (a) (getf a :user-id)))
+      (add-note! (update-record! mr :approvals (remove (getf user :id) (getf mr :approvals) :key (lambda (a) (getf a :user-id))))
+                 user "revoked their approval" :system? t)
+      mr))
+
+(defun merge-blockers (project mr)
+  "Why MR may not be merged yet, as a list of sentences; nil when it may."
+  (let ((blockers nil))
+    (when (merge-request-draft? mr) (push "It is a draft; take Draft: off the title first." blockers))
+    (let ((left (approvals-left project mr)))
+      (when (plusp left) (push (format nil "~a still needed." (plural left "approval")) blockers)))
+    (when (getf project :only-merge-if-pipeline-succeeds?)
+      (let* ((head (merge-request-head project mr))
+             (pipeline (and head (latest-pipeline project :sha head)))
+             (statuses (and head (commit-statuses project head)))
+             (summary (commit-statuses-summary statuses)))
+        (when (and pipeline (not (eq (getf pipeline :status) :success)))
+          (push (format nil "The pipeline is ~a; it has to succeed." (status-text (getf pipeline :status))) blockers))
+        (when (and summary (not (string= summary "success")))
+          (push (format nil "A check is ~a; all have to succeed." summary) blockers))))
+    (nreverse blockers)))

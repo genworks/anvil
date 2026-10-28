@@ -120,7 +120,8 @@ fetched out.  A job tagged `shell` may run on the image's own host when
 repository trees, blobs, files and their blame, branches, tags, commits
 (reading and making), archives, languages, releases with their assets
 and links, milestones, commit statuses, search, issues and notes, merge
-requests (reading, making, merging), pipelines, jobs, traces, artifacts
+requests (reading, making, approving, merging, with drafts and a
+pipeline gate), protected branches, pipelines, jobs, traces, artifacts
 (by job, or the latest of a ref), CI variables, webhooks.  See ARCHITECTURE.md for the list.
 
 ## Deployment

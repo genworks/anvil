@@ -332,6 +332,45 @@ ingot/ inside it, where the pipeline unpacks it.")
     (check "a stranger may not set a status" (eql 403 (nth-value 1 (ask (format nil "/api/v4/projects/1/statuses/~a" sha) :method :post :token *second-token*
                                                                          :content "state=success" :content-type "application/x-www-form-urlencoded"))))
     (check "the commit page shows the check" (let ((page (ask (format nil "/tester/smoke/-/commit/~a" sha)))) (and (search "ci/lint" page) (search "Checks" page)))))
+  ;; drafts, approvals and the pipeline gate on a merge request
+  (let ((settings (json (ask "/api/v4/projects/1" :method :put :token *token*
+                             :content "approvals_before_merge=1&only_allow_merge_if_pipeline_succeeds=true" :content-type "application/x-www-form-urlencoded"))))
+    (check "the merge settings through the API" (and (eql 1 (jget settings "approvals_before_merge")) (eq t (jget settings "only_allow_merge_if_pipeline_succeeds")))))
+  (ask "/api/v4/projects/1/repository/commits" :method :post :token *token* :content-type "application/json"
+       :content "{\"branch\":\"approvals\",\"start_branch\":\"master\",\"commit_message\":\"For approval\",\"actions\":[{\"action\":\"create\",\"file_path\":\"approved.txt\",\"content\":\"yes\\n\"}]}")
+  (let ((mr (json (ask "/api/v4/projects/1/merge_requests" :method :post :token *token*
+                       :content "source_branch=approvals&target_branch=master&title=Draft:+Approvals" :content-type "application/x-www-form-urlencoded"))))
+    (check "a draft merge request" (and (eq t (jget mr "draft")) (eql 1 (jget mr "approvals_before_merge"))))
+    (check "the page says draft" (search ">draft<" (ask (format nil "/tester/smoke/-/merge_requests/~d" (jget mr "iid")))))
+    (check "a draft does not merge" (eql 405 (nth-value 1 (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*))))
+    (ask (format nil "/api/v4/projects/1/merge_requests/~d" (jget mr "iid")) :method :put :token *token* :content "title=Approvals" :content-type "application/x-www-form-urlencoded")
+    (check "unapproved, it does not merge" (eql 405 (nth-value 1 (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*))))
+    (check "the approvals, before" (let ((a (json (ask (format nil "/api/v4/projects/1/merge_requests/~d/approvals" (jget mr "iid"))))))
+                                     (and (eql 1 (jget a "approvals_left")) (eq nil (jget a "approved")))))
+    (check "a stranger may not approve" (eql 403 (nth-value 1 (ask (format nil "/api/v4/projects/1/merge_requests/~d/approve" (jget mr "iid")) :method :post :token *second-token*))))
+    (check "an approval" (let ((a (json (ask (format nil "/api/v4/projects/1/merge_requests/~d/approve" (jget mr "iid")) :method :post :token *token*))))
+                           (and (eql 0 (jget a "approvals_left")) (eq t (jget a "approved")) (= 1 (length (jget a "approved_by"))))))
+    (check "the page shows the approval" (search ">approved<" (ask (format nil "/tester/smoke/-/merge_requests/~d" (jget mr "iid")))))
+    (check "approved, with no pipeline to wait for, it merges" (equal "merged" (jget (json (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*)) "state"))))
+  ;; a failing check on the source blocks the merge; a passing one lets it through
+  (let* ((commit (json (ask "/api/v4/projects/1/repository/commits" :method :post :token *token* :content-type "application/json"
+                            :content "{\"branch\":\"gated\",\"start_branch\":\"master\",\"commit_message\":\"Gated\",\"actions\":[{\"action\":\"create\",\"file_path\":\"gated.txt\",\"content\":\"g\\n\"}]}")))
+         (mr (json (ask "/api/v4/projects/1/merge_requests" :method :post :token *token*
+                        :content "source_branch=gated&target_branch=master&title=Gated" :content-type "application/x-www-form-urlencoded"))))
+    (ask (format nil "/api/v4/projects/1/statuses/~a" (jget commit "id")) :method :post :token *token*
+         :content "state=failed&name=ci/test" :content-type "application/x-www-form-urlencoded")
+    (ask (format nil "/api/v4/projects/1/merge_requests/~d/approve" (jget mr "iid")) :method :post :token *token*)
+    (check "a failed check blocks the merge" (eql 405 (nth-value 1 (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*))))
+    (ask (format nil "/api/v4/projects/1/statuses/~a" (jget commit "id")) :method :post :token *token*
+         :content "state=success&name=ci/test" :content-type "application/x-www-form-urlencoded")
+    (check "a passing check lets it through" (equal "merged" (jget (json (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*)) "state"))))
+  ;; protected branches, GitLab's shape
+  (check "the protected branches" (find "master" (coerce (json (ask "/api/v4/projects/1/protected_branches")) 'list) :key (lambda (b) (jget b "name")) :test #'equal))
+  (check "a branch protected" (equal "release" (jget (json (ask "/api/v4/projects/1/protected_branches" :method :post :token *token*
+                                                               :content "name=release" :content-type "application/x-www-form-urlencoded")) "name")))
+  (check "one protected branch" (eql 200 (nth-value 1 (ask "/api/v4/projects/1/protected_branches/release"))))
+  (check "a branch unprotected" (eql 204 (nth-value 1 (ask "/api/v4/projects/1/protected_branches/release" :method :delete :token *token*))))
+  (check "the default branch stays protected" (eql 400 (nth-value 1 (ask "/api/v4/projects/1/protected_branches/master" :method :delete :token *token*))))
   ;; archives
   (check "a tar.gz archive" (let ((octets (ask-octets "/tester/smoke/-/archive/master/smoke-master.tar.gz")))
                               (and (vectorp octets) (> (length octets) 100) (= (aref octets 0) #x1f))))
