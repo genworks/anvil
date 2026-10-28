@@ -1,7 +1,9 @@
 # Anvil
 
 A software forge in Common Lisp and Gendl: repositories served over
-Git's smart HTTP protocol, a web face for browsing them, issues, merge
+Git's smart HTTP protocol, a web face for browsing them (trees, files,
+blame, a file finder, search, commits with their patches and feeds,
+releases, the badges a README shows), issues, merge
 requests, continuous integration that runs a project's `.gitlab-ci.yml`
 or a native s-expression pipeline (`ci.sexp`), a REST API in GitLab's
 shapes, an OAuth2 provider, and a push-button deployment of a project
@@ -115,10 +117,11 @@ fetched out.  A job tagged `shell` may run on the image's own host when
 ## The API
 
 `/api/v4/`, in GitLab's names and shapes: projects, groups, members,
-repository trees, blobs, files, branches, tags, commits (reading and
-making), archives, issues and notes, merge requests (reading, making,
-merging), pipelines, jobs, traces, artifacts (by job, or the latest of
-a ref), CI variables, webhooks.  See ARCHITECTURE.md for the list.
+repository trees, blobs, files and their blame, branches, tags, commits
+(reading and making), archives, languages, releases, search, issues and
+notes, merge requests (reading, making, merging), pipelines, jobs,
+traces, artifacts (by job, or the latest of a ref), CI variables,
+webhooks.  See ARCHITECTURE.md for the list.
 
 ## Deployment
 

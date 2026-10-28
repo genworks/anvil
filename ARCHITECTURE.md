@@ -174,7 +174,19 @@ button confirms, the editor is a `<textarea>`.  Markdown is rendered
 by 3bmd with code blocks; HTML in Markdown is escaped.  Every page
 answers under its GitLab-shaped address, so links that exist today
 (`/<group>/<project>/-/blob/master/README.md`, `/-/issues/12`) keep
-working when a site moves from GitLab to Anvil.
+working when a site moves from GitLab to Anvil.  Beside the tree, the
+file, the commits and the diffs: a file's blame (`/-/blame/<ref>/<path>`,
+each line with the commit that wrote it, through Ingot's `blame`), the
+file finder (`/-/find_file/<ref>`, every path, narrowed as the visitor
+types), the search (`/-/search?search=&scope=blobs|commits|issues|merge_requests`,
+in process over the tree's text files), a commit as `.diff` and
+`.patch` (Ingot's `commit-patch` and `format-patch`), its trailers and
+whether it carries a signature, the commits as an Atom feed
+(`?format=atom`), the releases (`/-/releases`), the languages bar on the
+project page (by file name and bytes, as Linguist counts them; one
+computed slot of the project view), and the badges a README shows
+(`/<namespace>/<project>/badges/<ref>/pipeline.svg` and `release.svg`,
+drawn as SVG by the forge).
 
 ## The REST API
 
@@ -193,6 +205,10 @@ GitLab's names and shapes so that they work unchanged:
 | `GET /projects/:id/pipelines?per_page=`, `POST /projects/:id/pipeline?ref=`, `GET /pipelines/:id`, `GET /pipelines/:id/jobs`, `GET /jobs/:id`, `GET /jobs/:id/trace`, `POST /jobs/:id/retry`, `GET /jobs/:id/artifacts`, `GET /jobs/artifacts/:ref/download?job=`, `GET /jobs/artifacts/:ref/raw/:path?job=` | CI |
 | `GET/POST /projects/:id/variables` | CI variables (values shown to Maintainers only) |
 | `GET /projects/:id/hooks`, `POST /projects/:id/hooks` | webhooks |
+| `GET /projects/:id/repository/files/:path/blame?ref=` | blame: runs of lines, each with the commit that wrote them |
+| `GET /projects/:id/languages` | the languages of the default branch, by bytes, as percentages |
+| `GET/POST /projects/:id/releases`, `GET/DELETE /releases/:tag_name` | releases: a tag with a name and notes (the notes written from the commits since the tag before when left blank; `ref` makes the tag when it is new) |
+| `GET /projects/:id/search?scope=blobs|commits|issues|merge_requests&search=`, `GET /search?scope=projects|issues|merge_requests&search=` | search, in a project and across the forge |
 
 Authentication: `PRIVATE-TOKEN: <personal access token>`,
 `Authorization: Bearer <token>` (a personal token or an OAuth token),
@@ -418,13 +434,15 @@ there, which is how a read-only forge filled from a GitLab follows it.
 ## What is not here yet
 
 Git over ssh (keys are kept; no ssh front yet).  Wikis, snippets,
-Pages, releases beyond tags, LFS, the container registry (the kit
-builds that push an image into the project's registry will need one),
-subgroups below one level, pipeline schedules, parent-child
-pipelines, `include` from other projects, forks with cross-project
-merge requests (a fork is a clone and a merge request in the fork, or
-a push to a branch), full-text search of code, email notifications,
-two-factor sign-in.  Each is a seam rather than a wall; the order is
+Pages, release assets beyond the tag's archives, LFS, the container
+registry (the kit builds that push an image into the project's
+registry will need one), subgroups below one level, pipeline
+schedules, parent-child pipelines, `include` from other projects,
+forks with cross-project merge requests (a fork is a clone and a merge
+request in the fork, or a push to a branch), an index for the code
+search (it reads the tree on each query), email notifications,
+two-factor sign-in, signature verification (a signed commit is shown
+as signed, not as verified).  Each is a seam rather than a wall; the order is
 whatever common-lisp.net needs next.
 
 ## Where things are
@@ -438,9 +456,10 @@ anvil/
                     system (clo/ingot), found there, in INGOT_DIR, or
                     in ingot/ here, where the pipeline unpacks it
   source/           package, parameters, util, store, model, auth,
-                    permissions, markdown, yaml, ci-spec, ci-model,
-                    docker, runner, hooks, import, git-http, api, oauth,
-                    pages-*, deploy, initialize
+                    permissions, markdown, code (languages, search),
+                    yaml, ci-spec, ci-model, docker, runner, hooks,
+                    import, git-http, api, oauth, pages-*, deploy,
+                    initialize
   static/           anvil.css, the logo, a little script
   ci/test.lisp      the cold load and smoke test
   ci/runner-smoke.lisp

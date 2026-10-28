@@ -105,9 +105,13 @@ document.addEventListener('DOMContentLoaded',function(){
   document.addEventListener('click',function(e){for(var i=0;i<ms.length;i++)if(!ms[i].contains(e.target))ms[i].open=false;});
   var c=document.querySelector('[data-copy]');
   if(c){c.addEventListener('click',function(){var v=c.getAttribute('data-copy');if(navigator.clipboard)navigator.clipboard.writeText(v);c.textContent='copied';});}
+  var f=document.querySelector('[data-filter]');
+  if(f){var items=document.querySelectorAll(f.getAttribute('data-filter'));
+    f.addEventListener('input',function(){var q=f.value.toLowerCase();for(var i=0;i<items.length;i++)items[i].style.display=items[i].textContent.toLowerCase().indexOf(q)<0?'none':'';});}
 });})();"
   "The pages' one script: the job trace that follows itself, pages that
-poll while something runs, the menus, the copy button.")
+poll while something runs, the menus, the copy button, the list a
+visitor narrows by typing (the file finder).")
 
 (define-object anvil-site (base-object)
 
@@ -341,6 +345,7 @@ the next request.")
                                             :raw-base-url (format nil "~a/-/raw/~a" (project-url (the project)) (url-encode (the default-branch))))
                              (html (:pre (hs (ingot:octets-to-string data)))))))))
    (file-count (if (the head-commit) (length (ingot:tree-paths (the repository) (ingot:commit-tree (the head-commit)))) 0))
+   (languages (and (the head-commit) (tree-languages (the repository) (ingot:commit-tree (the head-commit)))))
    (commit-count (if (the head-oid) (ingot:count-commits (the repository) (the head-oid) :limit 10000) 0))
    (profile (progn (the head-stamp) (and (the head-oid) (ignore-errors (profile-report (the project) (the head-oid))))))
    (ci-file (and (the head-oid)

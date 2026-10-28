@@ -137,6 +137,18 @@ time { color: var(--muted); }
 .prose h1 { font-size: 1.5rem; margin-top: 1.5rem; } .prose h2 { font-size: 1.25rem; margin-top: 1.5rem; } .prose h3 { margin-top: 1.2rem; }
 .prose blockquote { border-left: 3px solid var(--rule-strong); margin: 1rem 0; padding: .2rem 1rem; color: var(--muted); }
 
+/* languages, blame, the file finder, releases */
+.lang-bar { display: flex; height: .5rem; border-radius: 999px; overflow: hidden; margin: .75rem 0 .4rem; background: var(--band); }
+.lang-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .2rem 1rem; font-size: .85rem; }
+.lang-legend .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; margin-right: .35rem; vertical-align: -1px; }
+.blame td.who { width: 1%; white-space: nowrap; color: var(--muted); font-family: var(--font); font-size: .8rem; border-right: 1px solid var(--rule); background: var(--code-bg); }
+.blame tr.run td { border-top: 1px solid var(--rule); }
+.file-list { list-style: none; padding: 0; margin: 0; font-family: var(--mono); font-size: .9rem; columns: 2; column-gap: 2rem; }
+.file-list li { padding: .1rem 0; }
+.label.trailer { font-size: .85rem; padding: .1rem .5rem; }
+.release .thing-head h2 { margin: 0; }
+.release .prose { margin-top: .75rem; }
+
 /* commits and diffs */
 .commit-list .sha { font-family: var(--mono); font-size: .85rem; }
 .commit-list .title a { color: var(--ink); font-weight: 600; }

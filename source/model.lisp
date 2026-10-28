@@ -355,3 +355,56 @@ the defaults."
 (defun unstar-project! (project user)
   (let ((stars (remove (getf user :id) (getf project :stars))))
     (update-record! project :stars stars :star-count (length stars))))
+
+;;; Releases: a tag with a name and notes, GitLab's way
+
+(defun project-releases (project)
+  "The project's releases, newest first."
+  (sort (records :release (lambda (r) (eql (getf r :project-id) (getf project :id))))
+        #'> :key (lambda (r) (or (getf r :released-at) (getf r :created)))))
+
+(defun find-release (project tag-name)
+  (find-record :release (lambda (r) (and (eql (getf r :project-id) (getf project :id))
+                                          (string= (getf r :tag-name) tag-name)))))
+
+(defun release-notes (project tag-oid)
+  "Markdown release notes for the commit TAG-OID: the subjects of the
+commits since the tag before it (every commit, when there is none)."
+  (let* ((repository (project-repository project))
+         (commit (ingot:read-commit repository tag-oid))
+         (previous (let ((parent (first (ingot:commit-parents commit))))
+                     (and parent (ingot:nearest-tag repository parent))))
+         (commits (remove-if (lambda (c) (> (length (ingot:commit-parents c)) 1))
+                             (ingot:commits-between repository (and previous (ingot:resolve-commit repository previous)) tag-oid))))
+    (when commits
+      (format nil "~:[### Changes~;### Changes since ~:*~a~]~%~%~{- ~a~%~}"
+              previous
+              (mapcar (lambda (c) (format nil "~a (~a)" (ingot:commit-subject c) (subseq (ingot:commit-oid c) 0 8))) commits)))))
+
+(defun make-release! (project author tag-name &key name description ref)
+  "A release of TAG-NAME, made at REF (a branch, a commit) when the tag
+does not exist yet; blank notes are written from the commits since the
+tag before.  Answers the record."
+  (when (blank? tag-name) (bad-request "A release needs a tag."))
+  (when (find-release project tag-name) (bad-request "A release of ~a exists." tag-name))
+  (let* ((repository (project-repository project))
+         (tag-ref (format nil "refs/tags/~a" tag-name))
+         (oid (or (ingot:ref-value* repository tag-ref)
+                  (let ((target (ingot:resolve-commit repository (if (blank? ref) (getf project :default-branch) ref))))
+                    (unless target (bad-request "No such ref to tag: ~a." ref))
+                    (unless (ingot:valid-ref-name? tag-ref) (bad-request "~s is not a tag name." tag-name))
+                    (ingot:update-ref! repository tag-ref target :old nil)
+                    (project-changed! project)
+                    target)))
+         (commit-oid (or (ingot:peel-to-commit repository oid) (bad-request "The tag ~a is not a commit." tag-name)))
+         (release (save-record! (new-record :release :project-id (getf project :id) :tag-name tag-name
+                                                    :name (if (blank? name) tag-name (trim name))
+                                                    :description (if (blank? description) (or (release-notes project commit-oid) "") description)
+                                                    :author-id (getf author :id)
+                                                    :released-at (get-universal-time)))))
+    (touch-project! project)
+    release))
+
+(defun delete-release! (project release)
+  (delete-record! release)
+  (touch-project! project))

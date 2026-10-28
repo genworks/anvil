@@ -46,7 +46,8 @@
                                                 (and *deploy-houses* (list :deployments "Deployments" (format nil "~a/-/deployments" url)))
                                                 (list :commits "Commits" (format nil "~a/-/commits/~a" url (url-encode (getf project :default-branch))))
                                                 (list :branches "Branches" (format nil "~a/-/branches" url) (princ-to-string (length (the-object view branches))))
-                                                (list :tags "Tags" (format nil "~a/-/tags" url) (princ-to-string (length (the-object view tags))))))
+                                                (list :tags "Tags" (format nil "~a/-/tags" url) (princ-to-string (length (the-object view tags))))
+                                                (list :releases "Releases" (format nil "~a/-/releases" url) (princ-to-string (length (project-releases project))))))
                                   active)))))
 
 (defun project-page (project title body &key (active :code) notice wide?)
@@ -86,7 +87,10 @@
                                                                               (:dt "Default branch") (:dd (:code (hs (the-object view default-branch))))
                                                                               (:dt "Last commit") (:dd (str (time-html (git-time-universal (ingot:commit-committer (the-object view head-commit))))))
                                                                               (when (the-object view ci-file)
-                                                                                (htm (:dt "CI") (:dd (:a :href (format nil "~a/-/blob/~a/~a" url (url-encode (the-object view default-branch)) (the-object view ci-file)) (hs (the-object view ci-file))))))))
+                                                                                (htm (:dt "CI") (:dd (:a :href (format nil "~a/-/blob/~a/~a" url (url-encode (the-object view default-branch)) (the-object view ci-file)) (hs (the-object view ci-file))))))
+                                                                              (:dt "Find") (:dd (:a :href (format nil "~a/-/find_file/~a" url (url-encode (the-object view default-branch))) "a file")
+                                                                                              " · " (:a :href (format nil "~a/-/search" url) "in the code")))
+                                                                            (str (languages-html (the-object view languages))))
                                                                       :title "About"))
                                           (when *deploy-houses*
                                             (str (profile-card project (the-object view profile))))))))
@@ -278,15 +282,40 @@ that changed it."
          (page (max 1 (or (ignore-errors (parse-integer (url-query-value req "page" "1"))) 1)))
          (per 30)
          (commits (ingot:log-commits repository start :limit per :skip (* per (1- page)) :path (and (plusp (length path)) path))))
-    (respond-html req ent
-                  (project-page project "Commits"
-                                (html (str (ref-picker-html project ref "commits" path))
-                                      (:h2 "Commits" (when (plusp (length path)) (htm " to " (:code (hs path)))))
-                                      (str (commit-list-html project commits))
-                                      (:div :class "pager"
-                                        (when (> page 1) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1- page)) "Newer")))
-                                        (when (= (length commits) per) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1+ page)) "Older")))))
-                                :active :commits))))
+    (if (equal (url-query-value req "format") "atom")
+        (respond req ent (commits-atom project ref path commits) :content-type "application/atom+xml; charset=utf-8" :cache-control "no-cache")
+        (respond-html req ent
+                      (project-page project "Commits"
+                                    (html (str (ref-picker-html project ref "commits" path))
+                                          (:h2 "Commits" (when (plusp (length path)) (htm " to " (:code (hs path))))
+                                               " " (:a :class "quiet" :style "font-size:.85rem;font-weight:400" :href (format nil "~a/-/commits/~a~@[/~a~]?format=atom" url (url-encode ref) (and (plusp (length path)) (path-encode path))) "feed"))
+                                          (str (commit-list-html project commits))
+                                          (:div :class "pager"
+                                            (when (> page 1) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1- page)) "Newer")))
+                                            (when (= (length commits) per) (htm (:a :class "btn btn-small btn-quiet" :href (format nil "~a/-/commits/~a~@[/~a~]?page=~d" url (url-encode ref) (and (plusp (length path)) (path-encode path)) (1+ page)) "Older")))))
+                                    :active :commits)))))
+
+(defun atom-timestamp (universal)
+  (multiple-value-bind (s mi h d mo y) (decode-universal-time universal 0)
+    (format nil "~4,'0d-~2,'0d-~2,'0dT~2,'0d:~2,'0d:~2,'0dZ" y mo d h mi s)))
+
+(defun commits-atom (project ref path commits)
+  "The commits as an Atom feed, the shape GitLab serves at
+/-/commits/<ref>?format=atom."
+  (let ((web (project-web-url project)))
+    (with-output-to-string (out)
+      (format out "<?xml version=\"1.0\" encoding=\"utf-8\"?>~%<feed xmlns=\"http://www.w3.org/2005/Atom\">~%")
+      (format out "  <title>~a:~a commits~@[ to ~a~]</title>~%" (hs (getf project :path-with-namespace)) (hs ref) (and (plusp (length path)) (hs path)))
+      (format out "  <id>~a/-/commits/~a</id>~%  <link href=\"~a/-/commits/~a\" rel=\"alternate\"/>~%" web (url-encode ref) web (url-encode ref))
+      (format out "  <updated>~a</updated>~%" (atom-timestamp (if commits (git-time-universal (ingot:commit-committer (first commits))) (get-universal-time))))
+      (dolist (commit commits)
+        (let ((oid (ingot:commit-oid commit)))
+          (format out "  <entry>~%    <id>~a/-/commit/~a</id>~%    <link href=\"~a/-/commit/~a\"/>~%    <title>~a</title>~%    <updated>~a</updated>~%    <author><name>~a</name><email>~a</email></author>~%    <summary type=\"text\">~a</summary>~%  </entry>~%"
+                  web oid web oid (hs (ingot:commit-subject commit))
+                  (atom-timestamp (git-time-universal (ingot:commit-committer commit)))
+                  (hs (ingot:commit-author-name commit)) (hs (ingot:commit-author-email commit))
+                  (hs (ingot:commit-message commit)))))
+      (format out "</feed>~%"))))
 
 (defun commit-list-html (project commits)
   (let ((url (project-url project)))
@@ -307,22 +336,41 @@ that changed it."
          (oid (or (ingot:resolve-commit repository sha) (not-found "No such commit.")))
          (commit (ingot:read-commit repository oid))
          (changes (ingot::commit-diff repository oid))
+         (trailers (ingot:commit-trailers commit))
+         (signature (ingot:commit-signature repository oid))
          (pipeline (latest-pipeline project :sha oid)))
     (respond-html req ent
                   (project-page project (ingot:commit-subject commit)
                                 (html (:div :class "card"
-                                        (:h2 (hs (ingot:commit-subject commit)))
-                                        (:pre :style "white-space:pre-wrap" (hs (string-trim '(#\Newline) (subseq (ingot:commit-message commit) (min (length (ingot:commit-message commit)) (length (ingot:commit-subject commit)))))))
+                                        (:h2 (hs (ingot:commit-subject commit))
+                                             (when signature (htm " " (:span :class "badge" :title "The commit carries a signature; the forge does not verify it." (hs (format nil "signed (~(~a~))" signature))))))
+                                        (:pre :style "white-space:pre-wrap" (hs (nth-value 1 (ingot:commit-subject-and-body commit))))
                                         (:dl :class "kv"
-                                          (:dt "Commit") (:dd (:code (hs oid)) " · " (:a :href (format nil "~a/-/tree/~a" url oid) "browse the tree"))
+                                          (:dt "Commit") (:dd (:code (hs oid)) " · " (:a :href (format nil "~a/-/tree/~a" url oid) "browse the tree")
+                                                              " · " (:a :href (format nil "~a/-/commit/~a.diff" url oid) ".diff")
+                                                              " · " (:a :href (format nil "~a/-/commit/~a.patch" url oid) ".patch"))
                                           (:dt "Author") (:dd (hs (ingot:commit-author-name commit)) " <" (hs (ingot:commit-author-email commit)) "> "
                                                               (str (time-html (git-time-universal (ingot:commit-author commit)))))
                                           (when (ingot:commit-parents commit)
                                             (htm (:dt "Parents") (:dd (dolist (p (ingot:commit-parents commit)) (htm (:a :href (format nil "~a/-/commit/~a" url p) (:code (hs (subseq p 0 8)))) " ")))))
+                                          (when trailers
+                                            (htm (:dt "Trailers") (:dd (loop for (token . value) in trailers
+                                                                           do (htm (:span :class "label trailer" (hs token) ": " (hs value)) " ")))))
                                           (when pipeline (htm (:dt "Pipeline") (:dd (str (status-badge-html (getf pipeline :status) :href (pipeline-url project pipeline))))))))
                                       (:h3 (hs (plural (length changes) "file")) " changed")
                                       (str (changes-html repository changes :url url :ref oid)))
                                 :active :commits :wide? t))))
+
+(defun commit-text-page (req ent project sha kind)
+  "<sha>.diff and <sha>.patch: the commit's patch, plain or as
+format-patch writes it."
+  (let* ((repository (project-repository project))
+         (oid (or (ingot:resolve-commit repository sha) (not-found "No such commit."))))
+    (respond req ent (if (string= kind "patch")
+                         (ingot:format-patch repository oid :signature (format nil "~a (anvil)" *site-name*))
+                         (ingot:commit-patch repository oid))
+             :content-type "text/plain; charset=utf-8"
+             :cache-control "public, max-age=31536000")))
 
 (defun changes-html (repository changes &key url ref (limit 60))
   "The diffs of CHANGES, as rendered unified diffs."
@@ -384,3 +432,49 @@ that changed it."
                                         (:h3 (hs (plural (length changes) "file")) " changed")
                                         (str (changes-html repository changes :url url :ref to)))
                                   :active :commits :wide? t)))))
+
+;;; Languages, and the badges
+
+(defun languages-html (languages)
+  "A bar and a legend for LANGUAGES (tree-languages' answer); nothing
+when there is nothing to say."
+  (let ((shares (language-percentages languages)))
+    (when shares
+      (html (:div :class "lang-bar" :title "Languages, by bytes"
+              (loop for (name . percent) in shares
+                    for color = (second (assoc name *languages* :test #'string=))
+                    do (htm (:span :style (format nil "width:~,2f%;background:~a" percent color) :title (format nil "~a ~,1f%" name percent)))))
+            (:ul :class "lang-legend"
+              (loop for (name . percent) in shares
+                    for color = (second (assoc name *languages* :test #'string=))
+                    do (htm (:li (:span :class "swatch" :style (format nil "background:~a" color)) (hs name) " " (:span :class "quiet" (hs (format nil "~,1f%" percent)))))))))))
+
+(defparameter *badge-colors*
+  '(("passed" . "#4c1") ("failed" . "#e05d44") ("running" . "#dfb317") ("pending" . "#dfb317")
+    ("canceled" . "#9f9f9f") ("skipped" . "#9f9f9f") ("manual" . "#9f9f9f") ("unknown" . "#9f9f9f"))
+  "The colors of the pipeline badge, GitLab's.")
+
+(defun badge-svg (label value color)
+  "A flat badge, the shape shields.io and GitLab draw: LABEL on grey,
+VALUE on COLOR."
+  (flet ((width (text) (+ 10 (round (* 6.6 (length text))))))
+    (let* ((lw (width label)) (vw (width value)) (w (+ lw vw)))
+      (format nil "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"~d\" height=\"20\" role=\"img\" aria-label=\"~a: ~a\"><title>~a: ~a</title><linearGradient id=\"s\" x2=\"0\" y2=\"100%\"><stop offset=\"0\" stop-color=\"#bbb\" stop-opacity=\".1\"/><stop offset=\"1\" stop-opacity=\".1\"/></linearGradient><clipPath id=\"r\"><rect width=\"~d\" height=\"20\" rx=\"3\" fill=\"#fff\"/></clipPath><g clip-path=\"url(#r)\"><rect width=\"~d\" height=\"20\" fill=\"#555\"/><rect x=\"~d\" width=\"~d\" height=\"20\" fill=\"~a\"/><rect width=\"~d\" height=\"20\" fill=\"url(#s)\"/></g><g fill=\"#fff\" text-anchor=\"middle\" font-family=\"Verdana,Geneva,DejaVu Sans,sans-serif\" font-size=\"110\"><text x=\"~d\" y=\"150\" fill=\"#010101\" fill-opacity=\".3\" transform=\"scale(.1)\" textLength=\"~d\">~a</text><text x=\"~d\" y=\"140\" transform=\"scale(.1)\" textLength=\"~d\">~a</text><text x=\"~d\" y=\"150\" fill=\"#010101\" fill-opacity=\".3\" transform=\"scale(.1)\" textLength=\"~d\">~a</text><text x=\"~d\" y=\"140\" transform=\"scale(.1)\" textLength=\"~d\">~a</text></g></svg>"
+              w (hs label) (hs value) (hs label) (hs value)
+              w lw lw vw color w
+              (* 5 lw) (* 10 (- lw 10)) (hs label) (* 5 lw) (* 10 (- lw 10)) (hs label)
+              (* 5 (+ (* 2 lw) vw)) (* 10 (- vw 10)) (hs value) (* 5 (+ (* 2 lw) vw)) (* 10 (- vw 10)) (hs value)))))
+
+(defun badge-page (req ent project ref name)
+  "/<namespace>/<project>/badges/<ref>/pipeline.svg and release.svg, as
+GitLab serves them, for a README to show."
+  (let ((svg (cond ((string= name "pipeline.svg")
+                    (let* ((pipeline (latest-pipeline project :ref ref))
+                           (status (if pipeline (status-text (getf pipeline :status)) "unknown"))
+                           (word (cond ((string= status "success") "passed") ((string= status "created") "pending") (t status))))
+                      (badge-svg "pipeline" word (or (cdr (assoc word *badge-colors* :test #'string=)) "#9f9f9f"))))
+                   ((string= name "release.svg")
+                    (let ((release (first (project-releases project))))
+                      (badge-svg "release" (if release (getf release :tag-name) "none") (if release "#007ec6" "#9f9f9f"))))
+                   (t (not-found "No such badge.")))))
+    (respond req ent svg :content-type "image/svg+xml" :cache-control "no-cache")))

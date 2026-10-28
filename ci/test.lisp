@@ -205,6 +205,29 @@ ingot/ inside it, where the pipeline unpacks it.")
                                      :key (lambda (b) (jget b "name")) :test #'equal))
     (check "the commit page" (eql 200 (nth-value 1 (ask (format nil "/tester/smoke/-/commit/~a" (jget commit "id"))))))
     (check "the compare page" (eql 200 (nth-value 1 (ask "/tester/smoke/-/compare?from=master&to=feature"))))
+    ;; the commit's patch, both ways, and the feed
+    (check "the commit as .diff" (let ((text (ask (format nil "/tester/smoke/-/commit/~a.diff" (jget commit "id")))))
+                                    (and (search "diff --git a/NOTES.md b/NOTES.md" text) (search "+# Notes" text) (not (search "Subject:" text)))))
+    (check "the commit as .patch" (let ((text (ask (format nil "/tester/smoke/-/commit/~a.patch" (jget commit "id")))))
+                                     (and (search (format nil "From ~a Mon Sep 17 00:00:00 2001" (jget commit "id")) text)
+                                          (search "Subject: [PATCH] Add notes" text) (search " create mode 100644 NOTES.md" text))))
+    (check "the commits feed" (let ((text (ask "/tester/smoke/-/commits/feature?format=atom")))
+                                (and (search "<feed xmlns=\"http://www.w3.org/2005/Atom\">" text) (search "<title>Add notes</title>" text))))
+    ;; blame, on the page and through the API
+    (check "the blame page" (let ((body (ask "/tester/smoke/-/blame/feature/README.md")))
+                              (and (search "Add notes" body) (search "Edited." body) (search "class=\"code blame\"" body))))
+    (check "blame through the API" (let ((runs (json (ask "/api/v4/projects/1/repository/files/README.md/blame?ref=feature"))))
+                                     (and (vectorp runs) (= (length runs) 2)
+                                          (search "Add notes" (jget (jget (aref runs 1) "commit") "message"))
+                                          (equal "# Smoke" (aref (jget (aref runs 0) "lines") 0))
+                                          (find "Edited." (coerce (jget (aref runs 1) "lines") 'list) :test #'equal))))
+    ;; the file finder and the search
+    (check "the file finder" (let ((body (ask "/tester/smoke/-/find_file/feature"))) (and (search "NOTES.md" body) (search "data-filter" body))))
+    (check "the search page finds a line of code" (search "NOTES.md" (ask "/tester/smoke/-/search?search=Notes&scope=blobs&ref=feature")))
+    (check "search through the API: blobs" (let ((hits (json (ask "/api/v4/projects/1/search?scope=blobs&search=notes&ref=feature"))))
+                                              (and (vectorp hits) (= (length hits) 1) (equal "NOTES.md" (jget (aref hits 0) "path")) (eql 1 (jget (aref hits 0) "startline")))))
+    (check "search through the API: commits" (= 1 (length (json (ask "/api/v4/projects/1/search?scope=commits&search=add+notes&ref=feature")))))
+    (check "search through the API: a global search for the project" (= 1 (length (json (ask "/api/v4/search?scope=projects&search=smoke")))))
     ;; an issue, a note
     (let ((issue (json (ask "/api/v4/projects/1/issues" :method :post :token *token* :content-type "application/json"
                                                          :content "{\"title\":\"An issue\",\"description\":\"With **markdown**\",\"labels\":\"bug\"}"))))
@@ -229,6 +252,35 @@ ingot/ inside it, where the pipeline unpacks it.")
         (check "the merge is on master" (search "# Notes" (ask "/api/v4/projects/1/repository/files/NOTES.md/raw?ref=master")))
         (check "the merge commit has two parents"
                (= 2 (length (jget (json (ask (format nil "/api/v4/projects/1/repository/commits/~a" (jget merged "merge_commit_sha")))) "parent_ids")))))))
+  ;; languages, from a commit with code in it
+  (check "no languages in prose alone" (zerop (hash-table-count (json (ask "/api/v4/projects/1/languages")))))
+  (let ((commit (json (ask "/api/v4/projects/1/repository/commits" :method :post :token *token*
+                                                                    :content-type "application/json"
+                                                                    :content "{\"branch\":\"master\",\"commit_message\":\"Add code\",\"actions\":[{\"action\":\"create\",\"file_path\":\"src/a.lisp\",\"content\":\"(defun a () 1)\\n\"},{\"action\":\"create\",\"file_path\":\"run.sh\",\"content\":\"echo hi\\n\"}]}"))))
+    (check "a commit of code" (equal "Add code" (jget commit "title")))
+    (let ((languages (json (ask "/api/v4/projects/1/languages"))))
+      (check "languages by bytes, as percentages" (and (= 2 (hash-table-count languages))
+                                                       (> (jget languages "Common Lisp") (jget languages "Shell"))
+                                                       (= 100 (round (+ (jget languages "Common Lisp") (jget languages "Shell"))))))
+      (check "the languages bar on the project page" (search "class=\"lang-bar\"" (ask "/tester/smoke")))))
+  ;; releases: a tag made with the release, notes written from the commits, the badges
+  (let ((release (json (ask "/api/v4/projects/1/releases" :method :post :token *token*
+                                                           :content "tag_name=v0.1&name=First+release&ref=master" :content-type "application/x-www-form-urlencoded"))))
+    (check "a release through the API" (and (equal "v0.1" (jget release "tag_name")) (equal "First release" (jget release "name"))))
+    (check "the release's notes name the commits" (and (search "### Changes" (jget release "description")) (search "Add code (" (jget release "description"))))
+    (check "the release made the tag" (find "v0.1" (coerce (json (ask "/api/v4/projects/1/repository/tags")) 'list) :key (lambda (tag) (jget tag "name")) :test #'equal))
+    (check "the release listed" (= 1 (length (json (ask "/api/v4/projects/1/releases")))))
+    (check "one release by its tag" (equal "First release" (jget (json (ask "/api/v4/projects/1/releases/v0.1")) "name")))
+    (check "a second release of the tag is refused" (eql 400 (nth-value 1 (ask "/api/v4/projects/1/releases" :method :post :token *token*
+                                                                                  :content "tag_name=v0.1" :content-type "application/x-www-form-urlencoded"))))
+    (check "a stranger may not release" (eql 403 (nth-value 1 (ask "/api/v4/projects/1/releases" :method :post :token *second-token*
+                                                                      :content "tag_name=v0.2&ref=master" :content-type "application/x-www-form-urlencoded"))))
+    (check "the releases page" (let ((body (ask "/tester/smoke/-/releases"))) (and (search "First release" body) (search "/-/archive/v0.1/smoke-v0-1.tar.gz" body))))
+    (check "the release page" (eql 200 (nth-value 1 (ask "/tester/smoke/-/releases/v0.1"))))
+    (check "the new release form" (eql 200 (nth-value 1 (ask "/tester/smoke/-/releases/new" :token *token*))))
+    (check "the pipeline badge" (let ((svg (ask "/tester/smoke/badges/master/pipeline.svg")))
+                                  (and (search "<svg" svg) (search ">pipeline<" svg) (search ">unknown<" svg))))
+    (check "the release badge names the release" (search ">v0.1<" (ask "/tester/smoke/badges/master/release.svg"))))
   ;; archives
   (check "a tar.gz archive" (let ((octets (ask-octets "/tester/smoke/-/archive/master/smoke-master.tar.gz")))
                               (and (vectorp octets) (> (length octets) 100) (= (aref octets 0) #x1f))))
