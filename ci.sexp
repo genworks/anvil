@@ -15,4 +15,11 @@
    ;; Ingot itself can fetch it)
    :before-script ("rm -rf \"$CI_PROJECT_DIR/ingot\" && curl -fsSL \"$INGOT_ARCHIVE\" | tar xz -C \"$CI_PROJECT_DIR\""
                    "mv \"$CI_PROJECT_DIR/ingot-master\" \"$CI_PROJECT_DIR/ingot\"")
+   :lisp (:load ("ci/test.lisp")))
+  ;; the same suite on SBCL
+  (:cold-load-and-smoke-sbcl
+   :stage :test
+   :image "genworks/gendl:devo-sbcl"
+   :before-script ("rm -rf \"$CI_PROJECT_DIR/ingot\" && curl -fsSL \"$INGOT_ARCHIVE\" | tar xz -C \"$CI_PROJECT_DIR\""
+                   "mv \"$CI_PROJECT_DIR/ingot-master\" \"$CI_PROJECT_DIR/ingot\"")
    :lisp (:load ("ci/test.lisp")))))

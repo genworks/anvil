@@ -455,8 +455,10 @@ a Lisp named in the image, with each file loaded in order."
   (let ((files (mapcar #'princ-to-string (getf lisp :load)))
         (evals (mapcar (lambda (e) (if (stringp e) e (let ((*print-case* :downcase)) (prin1-to-string e)))) (getf lisp :eval)))
         (program (getf lisp :program)))
+    ;; the Gendl image's launcher takes its Lisp's own flags: CCL's -n -b,
+    ;; SBCL's --non-interactive (the runner sets ANVIL_LISP_FLAGS by the image)
     (list (format nil "~a~{ --load \"$CI_PROJECT_DIR/~a\"~}~{ --eval ~s~}"
-                  (or program "cd /opt/gendl && ./gdl/program/gdl-$ANVIL_LISP -n -b")
+                  (or program "cd /opt/gendl && ./gdl/program/gdl-$ANVIL_LISP $ANVIL_LISP_FLAGS")
                   files evals))))
 
 ;;; Reading whatever the tree has

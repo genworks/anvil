@@ -23,6 +23,8 @@
 ;;; Locally, in the image, with ANVIL_DIR naming a checkout:
 ;;;   cd /opt/gendl && ANVIL_DIR=/path/to/anvil INGOT_DIR=/path/to/ingot \
 ;;;     ./gdl/program/gdl-ccl -n -b --load /path/to/anvil/ci/test.lisp
+;;; or, in the SBCL image, whose launcher is a plain SBCL and takes its flags:
+;;;     ./gdl/program/gdl-sbcl --non-interactive --load /path/to/anvil/ci/test.lisp
 ;;;
 
 (in-package :gdl-user)
@@ -77,7 +79,10 @@ ingot/ inside it, where the pipeline unpacks it.")
 
 (handler-case
     (progn
-      (uiop:enable-deferred-warnings-check)
+      ;; uiop's deferred-warnings check trips over SBCL 2.6's compiler
+      ;; internals; there the handler below sees the deferred style
+      ;; warnings at the end of each file instead
+      #-sbcl (uiop:enable-deferred-warnings-check)
       (asdf:load-asd (merge-pathnames "ingot.asd" *ingot-dir*))
       (asdf:load-asd (merge-pathnames "anvil.asd" *anvil-dir*))
       (handler-bind ((warning #'muffle-warning))
@@ -92,7 +97,11 @@ ingot/ inside it, where the pipeline unpacks it.")
              (report (make-string-output-stream))
              (*error-output* (make-broadcast-stream *error-output* report)))
         (handler-bind ((warning (lambda (w)
-                                  (problem "loading: ~a: ~a" (type-of w) w)
+                                  ;; SBCL notes every macro and function a
+                                  ;; compile-then-load defines twice; that is
+                                  ;; the load, not the code
+                                  (unless #+sbcl (typep w 'sb-kernel:redefinition-warning) #-sbcl nil
+                                    (problem "loading: ~a: ~a" (type-of w) w))
                                   (muffle-warning w))))
           (asdf:load-system :ingot)
           (asdf:load-system :anvil))

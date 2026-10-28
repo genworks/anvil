@@ -22,6 +22,8 @@ workflow:
         RUNNER_TAG: "amd64-docker"
     - when: always
 
+# The same suite on both engines.  The CCL launcher takes CCL's flags; the
+# SBCL launcher is a plain SBCL and takes SBCL's.
 cold-load-and-smoke:
   stage: test
   image: genworks/gendl:devo-ccl
@@ -31,3 +33,13 @@ cold-load-and-smoke:
     - rm -rf "$CI_PROJECT_DIR/ingot" && curl -fsSL "$INGOT_ARCHIVE" | tar xz -C "$CI_PROJECT_DIR" && mv "$CI_PROJECT_DIR/ingot-master" "$CI_PROJECT_DIR/ingot"
     - cd /opt/gendl
     - ANVIL_DIR="$CI_PROJECT_DIR" INGOT_DIR="$CI_PROJECT_DIR/ingot" ./gdl/program/gdl-ccl -n -b --load "$CI_PROJECT_DIR/ci/test.lisp"
+
+cold-load-and-smoke-sbcl:
+  stage: test
+  image: genworks/gendl:devo-sbcl
+  tags:
+    - $RUNNER_TAG
+  script:
+    - rm -rf "$CI_PROJECT_DIR/ingot" && curl -fsSL "$INGOT_ARCHIVE" | tar xz -C "$CI_PROJECT_DIR" && mv "$CI_PROJECT_DIR/ingot-master" "$CI_PROJECT_DIR/ingot"
+    - cd /opt/gendl
+    - ANVIL_DIR="$CI_PROJECT_DIR" INGOT_DIR="$CI_PROJECT_DIR/ingot" ./gdl/program/gdl-sbcl --non-interactive --load "$CI_PROJECT_DIR/ci/test.lisp"

@@ -320,7 +320,8 @@ project's, the pipeline's, the job's own."
                   (cons "CI_JOB_STAGE" (getf job :stage))
                   (cons "CI_JOB_URL" (strcat *site-url* (job-url project job)))
                   (cons "CI_REGISTRY" "")
-                  (cons "ANVIL_LISP" (lisp-of-image (job-image job)))))))
+                  (cons "ANVIL_LISP" (lisp-of-image (job-image job)))
+                  (cons "ANVIL_LISP_FLAGS" (if (string= (lisp-of-image (job-image job)) "sbcl") "--non-interactive" "-n -b"))))))
 
 (defun ref-slug (ref)
   (string-trim "-" (subseq (ppcre:regex-replace-all "[^a-z0-9]+" (string-downcase ref) "-") 0 (min 63 (length ref)))))
