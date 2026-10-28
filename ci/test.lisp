@@ -373,6 +373,22 @@ ingot/ inside it, where the pipeline unpacks it.")
     (ask (format nil "/api/v4/projects/1/statuses/~a" (jget commit "id")) :method :post :token *token*
          :content "state=success&name=ci/test" :content-type "application/x-www-form-urlencoded")
     (check "a passing check lets it through" (equal "merged" (jget (json (ask (format nil "/api/v4/projects/1/merge_requests/~d/merge" (jget mr "iid")) :method :put :token *token*)) "state"))))
+  ;; labels with colors, GitLab's shape
+  (let ((label (json (ask "/api/v4/projects/1/labels" :method :post :token *token*
+                          :content "name=urgent&color=%23ff0000&description=Now" :content-type "application/x-www-form-urlencoded"))))
+    (check "a label made" (and (equal "urgent" (jget label "name")) (equal "#FF0000" (jget label "color")) (equal "#FFFFFF" (jget label "text_color"))))
+    (check "a bad color refused" (eql 400 (nth-value 1 (ask "/api/v4/projects/1/labels" :method :post :token *token*
+                                                              :content "name=odd&color=red" :content-type "application/x-www-form-urlencoded"))))
+    (check "the labels, defaults and worn ones among them" (let ((names (mapcar (lambda (l) (jget l "name")) (coerce (json (ask "/api/v4/projects/1/labels")) 'list))))
+                                                             (and (member "urgent" names :test #'equal) (member "bug" names :test #'equal))))
+    (check "the bug label counts its issue" (let ((bug (find "bug" (coerce (json (ask "/api/v4/projects/1/labels")) 'list) :key (lambda (l) (jget l "name")) :test #'equal)))
+                                              (and bug (eql 1 (jget bug "closed_issues_count")))))
+    (check "a label renamed and recolored" (let ((updated (json (ask (format nil "/api/v4/projects/1/labels/~d" (jget label "id")) :method :put :token *token*
+                                                                        :content "new_name=critical&color=%23000000" :content-type "application/x-www-form-urlencoded"))))
+                                              (and (equal "critical" (jget updated "name")) (equal "#000000" (jget updated "color")))))
+    (check "the labels page, chips in color" (let ((page (ask "/tester/smoke/-/labels"))) (and (search "critical" page) (search "background:#000000" page))))
+    (check "the issue list wears the color" (search "class=\"label\" style=\"background:" (ask "/tester/smoke/-/issues?state=all")))
+    (check "a label deleted" (eql 204 (nth-value 1 (ask (format nil "/api/v4/projects/1/labels/~d" (jget label "id")) :method :delete :token *token*)))))
   ;; protected branches, GitLab's shape
   (check "the protected branches" (find "master" (coerce (json (ask "/api/v4/projects/1/protected_branches")) 'list) :key (lambda (b) (jget b "name")) :test #'equal))
   (check "a branch protected" (equal "release" (jget (json (ask "/api/v4/projects/1/protected_branches" :method :post :token *token*

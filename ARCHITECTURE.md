@@ -203,6 +203,7 @@ GitLab's names and shapes so that they work unchanged:
 | `GET/POST /projects/:id/issues`, `GET/PUT /issues/:iid`, `GET/POST /issues/:iid/notes` | issues |
 | `GET/POST /projects/:id/merge_requests?state=&source_branch=`, `GET/PUT /merge_requests/:iid`, `PUT /merge_requests/:iid/merge`, `GET /merge_requests/:iid/approvals`, `POST /approve`, `POST /unapprove` | merge requests; a draft (`Draft:` in the title) does not merge, nor one short of the project's `approvals_before_merge` (a push to the source asks again), nor, with `only_allow_merge_if_pipeline_succeeds`, one whose head's pipeline or checks have not succeeded |
 | `GET/POST /projects/:id/protected_branches`, `GET/DELETE /protected_branches/:name` | the branches Maintainers alone push to |
+| `GET/POST /projects/:id/labels`, `GET/PUT/DELETE /labels/:id` (an id or a name; `new_name`, `color`, `description`) | labels with their colors and counts; a renamed label is followed by the things wearing it |
 | `GET /projects/:id/pipelines?per_page=`, `POST /projects/:id/pipeline?ref=`, `GET /pipelines/:id`, `GET /pipelines/:id/jobs`, `GET /jobs/:id`, `GET /jobs/:id/trace`, `POST /jobs/:id/retry`, `GET /jobs/:id/artifacts`, `GET /jobs/artifacts/:ref/download?job=`, `GET /jobs/artifacts/:ref/raw/:path?job=` | CI |
 | `GET/POST /projects/:id/variables` | CI variables (values shown to Maintainers only) |
 | `GET /projects/:id/hooks`, `POST /projects/:id/hooks` | webhooks |

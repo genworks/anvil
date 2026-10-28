@@ -437,8 +437,7 @@ path up to a resource word), and the segments after it."
              (respond-page req ent members #'member-json))))
       ((string= (first rest) "deployments")
        (respond-page req ent (project-deployments project) #'deployment-json))
-      ((string= (first rest) "labels")
-       (respond-page req ent (project-labels project) (lambda (label) (json-table "name" label "color" "#428BCA"))))
+      ((string= (first rest) "labels") (api-labels req ent project (rest rest)))
       ((string= (first rest) "languages")
        (let ((table (json-table)))
          (dolist (pair (language-percentages (the-object (project-view project) languages)))
@@ -768,6 +767,48 @@ and POST /assets (a multipart file) -- the last is Anvil's own."
                      ((string= (second rest) "merge_requests")
                       (respond-page req ent (nth-value 1 (milestone-things project milestone)) (lambda (m) (merge-request-json project m))))
                      (t (respond-error-json req ent 404 "404 Not Found"))))))))
+
+(defun text-color-for (hex)
+  "Black or white, whichever reads on the color HEX."
+  (let* ((digits (if (= (length hex) 4)
+                     (coerce (loop for c across (subseq hex 1) append (list c c)) 'string)
+                     (subseq hex 1)))
+         (r (parse-integer digits :start 0 :end 2 :radix 16))
+         (g (parse-integer digits :start 2 :end 4 :radix 16))
+         (b (parse-integer digits :start 4 :end 6 :radix 16)))
+    (if (> (+ (* 299 r) (* 587 g) (* 114 b)) 150000) "#1F1E24" "#FFFFFF")))
+
+(defun label-json (project name &optional label)
+  "GitLab's label shape for NAME (a record LABEL when it has one)."
+  (multiple-value-bind (open closed mrs) (label-counts project name)
+    (let ((color (label-color project name)))
+      (json-table "id" (if label (getf label :id) :null) "name" name
+                  "color" (string-upcase color) "text_color" (text-color-for color)
+                  "description" (or (and label (getf label :description)) (third (assoc name *label-defaults* :test #'string-equal)) "")
+                  "description_html" (or (and label (getf label :description)) "")
+                  "open_issues_count" open "closed_issues_count" closed "open_merge_requests_count" mrs
+                  "subscribed" 'yason:false "priority" :null "is_project_label" 'yason:true))))
+
+(defun api-labels (req ent project rest)
+  "GET/POST /labels (name, color, description), GET/PUT/DELETE /labels/:id
+(:id a record id or a name; PUT takes new_name, color, description)."
+  (let ((method (http-method req)))
+    (cond ((and (null rest) (eq method :get))
+           (respond-page req ent (project-labels project) (lambda (name) (label-json project name (find-label project name)))))
+          ((and (null rest) (eq method :post))
+           (require-can :update-issue project)
+           (let ((label (make-label! project (param req "name") :color (param req "color") :description (param req "description"))))
+             (respond-json req ent (label-json project (getf label :name) label) :status 201)))
+          (t (let* ((key (url-decode (first rest)))
+                    (label (find-label project (or (ignore-errors (parse-integer key)) key))))
+               (cond ((null label) (respond-error-json req ent 404 "404 Label Not Found"))
+                     ((eq method :get) (respond-json req ent (label-json project (getf label :name) label)))
+                     ((eq method :put) (require-can :update-issue project)
+                      (let ((updated (update-label! project label :new-name (param req "new_name") :color (param req "color") :description (param req "description"))))
+                        (respond-json req ent (label-json project (getf updated :name) updated))))
+                     ((eq method :delete) (require-can :update-issue project) (delete-label! project label)
+                      (respond req ent "" :status 204))
+                     (t (respond-error-json req ent 405 "405 Method Not Allowed"))))))))
 
 (defun commit-status-json (project status)
   (json-table "id" (getf status :id) "sha" (getf status :sha) "ref" (or (getf status :ref) :null)

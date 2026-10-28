@@ -30,9 +30,9 @@
                                 (html (:div :class "filters"
                                         (loop for (key name) in (if issue? '((:opened "Open") (:closed "Closed") (:all "All")) '((:opened "Open") (:merged "Merged") (:closed "Closed") (:all "All")))
                                               do (htm (:a :class (if (eq key state) "active" "") :href (format nil "~a/-/~a?state=~(~a~)" url segment key) (hs name))))
-                                        (when label (htm (:span :class "label" (hs label)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
+                                        (when label (htm (str (label-html project label)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
                                         (when milestone (htm (:span :class "badge" "milestone: " (hs milestone)) (:a :href (format nil "~a/-/~a" url segment) "clear")))
-                                        (when issue? (htm (:a :href (format nil "~a/-/milestones" url) "Milestones")))
+                                        (when issue? (htm (:a :href (format nil "~a/-/milestones" url) "Milestones") (:a :href (format nil "~a/-/labels" url) "Labels")))
                                         (when (if issue? (can? :create-issue project) (can? :create-merge-request project))
                                           (htm (str (mutating-link (format nil "~a/-/~a/new" url segment) (if issue? "New issue" "New merge request")
                                                                    :class "btn btn-small" :style "margin-left:auto")))))
@@ -41,7 +41,7 @@
                                                                              (list (status-badge-html (getf thing :state))
                                                                                    (html (:span :class "title" (:a :href (thing-url project thing) (hs (getf thing :title))))
                                                                                          (unless issue? (htm " " (:code (hs (getf thing :source-branch))) " → " (:code (hs (getf thing :target-branch)))))
-                                                                                         (dolist (l (getf thing :labels)) (htm " " (:a :class "label" :href (format nil "~a/-/~a?label=~a" url segment (url-encode l)) (hs l))))
+                                                                                         (dolist (l (getf thing :labels)) (htm " " (str (label-html project l :href (format nil "~a/-/~a?label=~a" url segment (url-encode l))))))
                                                                                          (:div :class "meta" (if issue? "#" "!") (hs (princ-to-string (getf thing :iid)))))
                                                                                    (user-link-html (record :user (getf thing :author-id)))
                                                                                    (time-html (getf thing :created))
@@ -108,7 +108,7 @@
                                         (when (and (not issue?) (merge-request-draft? thing)) (htm (:span :class "badge" "draft")))
                                         (:h2 (hs (getf thing :title)) " " (:span :class "quiet" (if issue? "#" "!") (hs (princ-to-string (getf thing :iid)))))
                                         (:span :class "quiet" "opened " (str (time-html (getf thing :created))) " by " (str (user-link-html author)))
-                                        (dolist (l (getf thing :labels)) (htm (:a :class "label" :href (format nil "~a/-/~a?label=~a" url segment (url-encode l)) (hs l)))))
+                                        (dolist (l (getf thing :labels)) (htm (str (label-html project l :href (format nil "~a/-/~a?label=~a" url segment (url-encode l)))))))
                                       (:div :class "grid"
                                         (:div
                                           (:div :class "note"
@@ -241,6 +241,59 @@
     (http-error (e) (redirect req ent (with-notice (thing-url project mr) (http-error-text e))))))
 
 ;;; Milestones
+
+;;; Labels
+
+(defun label-html (project name &key href)
+  "The chip for the label NAME in its color, a link when HREF."
+  (let* ((color (label-color project name))
+         (style (format nil "background:~a;color:~a" color (text-color-for color))))
+    (if href
+        (html (:a :class "label" :style style :href href (hs name)))
+        (html (:span :class "label" :style style (hs name))))))
+
+(defun labels-page (req ent project &key error)
+  (let ((url (project-url project)))
+    (respond-html req ent
+                  (project-page project "Labels"
+                                (html (:div :class "filters"
+                                        (:a :href (format nil "~a/-/issues" url) "Issues")
+                                        (:a :href (format nil "~a/-/milestones" url) "Milestones"))
+                                      (str (html-table '("Label" "Description" "Open issues" "Closed" "Merge requests" "")
+                                                       (mapcar (lambda (name)
+                                                                 (let ((label (find-label project name)))
+                                                                   (multiple-value-bind (open closed mrs) (label-counts project name)
+                                                                     (list (label-html project name :href (format nil "~a/-/issues?label=~a" url (url-encode name)))
+                                                                           (hs (or (and label (getf label :description)) (third (assoc name *label-defaults* :test #'string-equal)) ""))
+                                                                           (hs (princ-to-string open)) (hs (princ-to-string closed)) (hs (princ-to-string mrs))
+                                                                           (if (and label (can? :update-issue project))
+                                                                               (html (:form :method "post" :action (format nil "~a/-/labels/~d/delete" url (getf label :id)) :style "display:inline"
+                                                                                       (str (form-button "Delete" :class "btn btn-small btn-quiet" :confirm (format nil "Delete the label ~a? The issues wearing it lose it." name)))))
+                                                                               "")))))
+                                                               (project-labels project))
+                                                       :empty "No labels."))
+                                      (when (can? :update-issue project)
+                                        (htm (:form :method "post" :action (format nil "~a/-/labels" url) :class "card" :style "margin-top:1rem"
+                                               (:h3 :class "card-title" "New label")
+                                               (when error (htm (:p :class "profile-bad" (hs error))))
+                                               (:div :class "actions" :style "margin:0"
+                                                 (:input :type "text" :name "name" :placeholder "name" :required t)
+                                                 (:input :type "color" :name "color" :value "#428bca" :aria-label "Color")
+                                                 (:input :type "text" :name "description" :placeholder "description" :style "min-width:16rem")
+                                                 (str (form-button "Add" :class "btn btn-small")))))))
+                                :active :issues :notice (flash-notice req)))))
+
+(defun label-post (req ent project)
+  (require-can :update-issue project)
+  (handler-case
+      (progn (make-label! project (param req "name") :color (param req "color") :description (param req "description"))
+             (redirect req ent (with-notice (format nil "~a/-/labels" (project-url project)) "Label added.")))
+    (http-error (e) (labels-page req ent project :error (http-error-text e)))))
+
+(defun label-delete-post (req ent project label)
+  (require-can :update-issue project)
+  (delete-label! project label)
+  (redirect req ent (with-notice (format nil "~a/-/labels" (project-url project)) "Label deleted.")))
 
 (defun milestone-progress-html (project milestone)
   "The count of things done and open under MILESTONE, and a bar."

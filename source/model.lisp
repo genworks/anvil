@@ -313,13 +313,74 @@ answers the updated record."
   (format nil "~a/-/~a/~d" (project-url project)
           (if (eq (getf thing :kind) :issue) "issues" "merge_requests") (getf thing :iid)))
 
+(defparameter *label-defaults*
+  '(("bug" "#d9534f" "Something is broken") ("enhancement" "#428bca" "Something could be better")
+    ("question" "#9b59b6" "A question") ("documentation" "#0075ca" "The docs"))
+  "The labels every project starts with: name, color, description.")
+
+(defun project-label-records (project)
+  (sort (records :label (lambda (l) (eql (getf l :project-id) (getf project :id)))) #'string-lessp :key (lambda (l) (getf l :name))))
+
+(defun find-label (project name-or-id)
+  (find-record :label (lambda (l) (and (eql (getf l :project-id) (getf project :id))
+                                        (if (integerp name-or-id) (eql (getf l :id) name-or-id) (string-equal (getf l :name) name-or-id))))))
+
+(defun valid-color? (text)
+  (and (stringp text) (member (length text) '(4 7)) (char= (char text 0) #\#)
+       (every (lambda (c) (digit-char-p c 16)) (subseq text 1))))
+
+(defun make-label! (project name &key color description)
+  "A label of the project: a name, a color (#rrggbb), a description."
+  (when (blank? name) (bad-request "A label needs a name."))
+  (when (find-label project (trim name)) (bad-request "A label ~a exists." (trim name)))
+  (when (and (not (blank? color)) (not (valid-color? color))) (bad-request "A color is #rrggbb, not ~s." color))
+  (save-record! (new-record :label :project-id (getf project :id) :name (trim name)
+                                   :color (if (blank? color) "#428bca" (string-downcase color))
+                                   :description (or description ""))))
+
+(defun update-label! (project label &key new-name color description)
+  (when (and new-name (not (blank? new-name)) (not (string-equal new-name (getf label :name))))
+    (when (find-label project (trim new-name)) (bad-request "A label ~a exists." (trim new-name)))
+    ;; the things that wear the label follow its new name
+    (dolist (thing (append (project-issues project :state :all) (project-merge-requests project :state :all)))
+      (when (member (getf label :name) (getf thing :labels) :test #'string-equal)
+        (update-record! thing :labels (substitute (trim new-name) (getf label :name) (getf thing :labels) :test #'string-equal)))))
+  (when (and color (not (blank? color)) (not (valid-color? color))) (bad-request "A color is #rrggbb, not ~s." color))
+  (apply #'update-record! label
+         (append (when (and new-name (not (blank? new-name))) (list :name (trim new-name)))
+                 (when (and color (not (blank? color))) (list :color (string-downcase color)))
+                 (when description (list :description description)))))
+
+(defun delete-label! (project label)
+  "Delete LABEL; the things that wore it lose it."
+  (dolist (thing (append (project-issues project :state :all) (project-merge-requests project :state :all)))
+    (when (member (getf label :name) (getf thing :labels) :test #'string-equal)
+      (update-record! thing :labels (remove (getf label :name) (getf thing :labels) :test #'string-equal))))
+  (delete-record! label))
+
+(defun label-color (project name)
+  "The color of the label NAME: its record's, a default's, else the plain one."
+  (let ((label (find-label project name)))
+    (or (and label (getf label :color))
+        (second (assoc name *label-defaults* :test #'string-equal))
+        "#6a7280")))
+
+(defun label-counts (project name)
+  "Three values: open issues, closed issues and open merge requests wearing NAME."
+  (let ((issues (remove-if-not (lambda (i) (member name (getf i :labels) :test #'string-equal)) (project-issues project :state :all)))
+        (mrs (remove-if-not (lambda (m) (member name (getf m :labels) :test #'string-equal)) (project-merge-requests project))))
+    (values (count :opened issues :key (lambda (i) (getf i :state)))
+            (count :closed issues :key (lambda (i) (getf i :state)))
+            (length mrs))))
+
 (defun project-labels (project)
-  "Every label used in the project's issues and merge requests, with
-the defaults."
-  (let ((labels (copy-list '("bug" "enhancement" "question" "documentation"))))
+  "Every label name the project knows: its label records, the defaults,
+and whatever its issues and merge requests wear."
+  (let ((labels (append (mapcar (lambda (l) (getf l :name)) (project-label-records project))
+                        (mapcar #'first *label-defaults*))))
     (dolist (thing (append (project-issues project :state :all) (project-merge-requests project :state :all)))
       (dolist (label (getf thing :labels)) (pushnew label labels :test #'string-equal)))
-    (sort labels #'string-lessp)))
+    (sort (remove-duplicates labels :test #'string-equal) #'string-lessp)))
 
 ;;; CI variables, hooks
 

@@ -110,7 +110,8 @@ time { color: var(--muted); }
 .status-manual, .status-held { background: var(--warn-soft); color: var(--warn); }
 .status-opened, .status-live { background: var(--ok-soft); color: var(--ok); }
 .status-closed, .status-merged { background: var(--info-soft); color: var(--info); }
-.label { display: inline-block; padding: 0 .5rem; border-radius: 4px; background: var(--info-soft); color: var(--info); font-size: .8rem; margin-right: .3rem; }
+.label { display: inline-block; padding: 0 .5rem; border-radius: 4px; background: var(--info-soft); color: var(--info); font-size: .8rem; margin-right: .3rem; font-weight: 600; }
+a.label:hover { text-decoration: none; filter: brightness(1.1); }
 .clone-box { display: flex; gap: .4rem; align-items: center; }
 .clone-box input { font-family: var(--mono); font-size: .85rem; flex: 1; padding: .35rem .5rem; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--bg); color: var(--ink); }
 .visibility { font-size: .8rem; color: var(--muted); border: 1px solid var(--rule-strong); border-radius: 4px; padding: 0 .4rem; }
